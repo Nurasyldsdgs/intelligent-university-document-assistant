@@ -1,0 +1,44 @@
+package com.university.docassistant.repository;
+
+import com.university.docassistant.entity.Course;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+/** Enrollments live in {@link EnrollmentRepository}. */
+@Repository
+public interface CourseRepository extends JpaRepository<Course, Long> {
+
+    @EntityGraph(attributePaths = "teacher")
+    @Query(value = "SELECT c FROM Course c", countQuery = "SELECT COUNT(c) FROM Course c")
+    Page<Course> findAllWithTeacher(Pageable pageable);
+
+    @EntityGraph(attributePaths = "teacher")
+    Page<Course> findByTeacherId(Long teacherId, Pageable pageable);
+
+    @EntityGraph(attributePaths = "teacher")
+    @Query(value = "SELECT c FROM Enrollment e JOIN e.course c WHERE e.id.studentId = :studentId",
+            countQuery = "SELECT COUNT(e) FROM Enrollment e WHERE e.id.studentId = :studentId")
+    Page<Course> findByStudentId(@Param("studentId") Long studentId, Pageable pageable);
+
+    @EntityGraph(attributePaths = "teacher")
+    Optional<Course> findWithTeacherById(Long id);
+
+    @Query("SELECT c.id FROM Course c WHERE c.teacher.id = :teacherId")
+    List<Long> findIdsByTeacherId(@Param("teacherId") Long teacherId);
+
+    @Query("SELECT c.id FROM Course c")
+    List<Long> findAllIds();
+
+    @Modifying
+    @Query("UPDATE Course c SET c.teacher = NULL WHERE c.teacher.id = :teacherId")
+    int detachTeacher(@Param("teacherId") Long teacherId);
+}

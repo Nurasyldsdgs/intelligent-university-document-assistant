@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+/* Tailwind v4 equivalent of darkMode: "class": dark: variants apply under <html class="dark">. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --animate-step-in: step-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-shake: shake 0.4s ease-in-out;
+
+  @keyframes step-in {
+    from {
+      opacity: 0;
+      transform: translateX(24px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-6px); }
+    40%, 80% { transform: translateX(6px); }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-step-in,
+  .animate-shake {
+    animation: none;
+  }
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  @apply bg-slate-50 font-sans text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+}
+
+/* Native controls (select, scrollbars, date pickers) follow the theme too. */
+.dark {
+  color-scheme: dark;
+}

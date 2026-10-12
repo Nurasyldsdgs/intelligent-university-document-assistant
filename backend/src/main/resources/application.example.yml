@@ -1,0 +1,114 @@
+# Template for application.yml (which is git-ignored): copy it next to this file as application.yml.
+# Every secret is read from an environment variable or from backend/.env (see backend/.env.example);
+# the values after ":" are local-development placeholders only.
+
+server:
+  port: 8080
+
+spring:
+  application:
+    name: doc-assistant
+  config:
+    # Optional KEY=VALUE file in the working directory (backend/.env when started from backend/), e.g. AI_API_KEY=gsk_...
+    # Real environment variables take precedence over it.
+    import: optional:file:.env[.properties]
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/doc_assistant_db}
+    username: ${DB_USERNAME:postgres}
+    # Matches POSTGRES_PASSWORD in docker-compose.yml; set DB_PASSWORD for any other database.
+    password: ${DB_PASSWORD:postgres_password}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  data:
+    web:
+      pageable:
+        # Caps ?size= so a single request cannot pull a whole table.
+        default-page-size: 20
+        max-page-size: 100
+
+  servlet:
+    multipart:
+      # One part may be a ZIP archive (up to 50 MB); every document in it, and every file uploaded on its own, is
+      # still limited to 20 MB by DocumentService. A multi-file upload sends several parts in one request.
+      max-file-size: ${MAX_UPLOAD_SIZE:50MB}
+      max-request-size: ${MAX_REQUEST_SIZE:100MB}
+
+  # Gmail / Google Workspace SMTP. The password is a Google App Password (spaces removed).
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:your-account@example.com}
+    password: ${MAIL_PASSWORD:your-google-app-password}
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          ssl:
+            trust: "*"
+          connectiontimeout: 10000
+          timeout: 10000
+          writetimeout: 10000
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID:your-google-client-id}
+            client-secret: ${GOOGLE_CLIENT_SECRET:your-google-client-secret}
+            scope:
+              - openid
+              - profile
+              - email
+
+app:
+  jwt:
+    # Base64-encoded, at least 256 bits for HS256. Generate your own: openssl rand -base64 32
+    # The placeholder below is valid only so the app starts locally; never use it in production.
+    secret: ${JWT_SECRET:bG9jYWwtZGV2LW9ubHktand0LXNlY3JldC1yZXBsYWNlLW1lLWluLXByb2QhIQ==}
+    expiration-ms: 86400000
+  otp:
+    expiration-minutes: 10
+    max-attempts: 5
+    resend-cooldown-seconds: 60
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  mail:
+    # Gmail only delivers mail "from" the authenticated account, so keep it equal to spring.mail.username.
+    from: ${MAIL_FROM:your-account@example.com}
+    from-name: UniDocs Assistant
+  storage:
+    # Relative paths resolve against the backend's working directory. Never commit this folder.
+    upload-dir: ${UPLOAD_DIR:uploads}
+  ai:
+    # Classification (US-05), deadline extraction and Q&A through an OpenAI-compatible Chat Completions API.
+    # Default: Groq with llama-3.3-70b-versatile; OpenAI, DeepSeek, OpenRouter... work by changing the two lines below.
+    # The key comes from AI_API_KEY, else OPENAI_API_KEY (environment or backend/.env, see .env.example).
+    # With AI_ENABLED=false or the demo key nothing is sent and uploads work as usual, just without AI.
+    enabled: ${AI_ENABLED:true}
+    api-key: ${AI_API_KEY:${OPENAI_API_KEY:demo-key}}
+    model: ${AI_MODEL:llama-3.3-70b-versatile}
+    base-url: ${AI_BASE_URL:https://api.groq.com/openai/v1}
+    connect-timeout: 10s
+    read-timeout: ${AI_READ_TIMEOUT:90s}
+    # About 15-25k tokens; the rest of a longer document is not sent.
+    max-input-chars: ${AI_MAX_INPUT_CHARS:60000}
+    max-concurrency: ${AI_MAX_CONCURRENCY:4}
+    queue-capacity: ${AI_QUEUE_CAPACITY:200}
+    # Q&A answers synchronously; questions beyond this many in flight get 503 instead of piling up.
+    max-concurrent-questions: ${AI_MAX_CONCURRENT_QUESTIONS:20}

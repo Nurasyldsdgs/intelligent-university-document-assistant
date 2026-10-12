@@ -11,3 +11,6 @@ build/
 node_modules/
 .idea/
 *.iml
+
+# Uploaded user files (documents, submissions) must never be committed
+uploads/

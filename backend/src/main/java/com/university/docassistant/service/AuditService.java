@@ -20,16 +20,23 @@ import java.time.LocalDateTime;
 public class AuditService {
 
     public static final String ACCESS_DENIED = "ACCESS_DENIED";
+    public static final String LOGIN_LOCKED = "LOGIN_LOCKED";
     public static final String DOCUMENT_UPLOADED = "DOCUMENT_UPLOADED";
     public static final String DOCUMENT_DELETED = "DOCUMENT_DELETED";
+    public static final String DOCUMENT_CLASSIFIED = "DOCUMENT_CLASSIFIED";
+    public static final String BATCH_IMPORTED = "BATCH_IMPORTED";
     public static final String COURSE_CREATED = "COURSE_CREATED";
     public static final String COURSE_TEACHER_CHANGED = "COURSE_TEACHER_CHANGED";
     public static final String STUDENT_ENROLLED = "STUDENT_ENROLLED";
     public static final String STUDENT_UNENROLLED = "STUDENT_UNENROLLED";
+    public static final String COURSE_JOIN_FAILED = "COURSE_JOIN_FAILED";
+    public static final String COURSE_INVITE_REGENERATED = "COURSE_INVITE_REGENERATED";
     public static final String ASSIGNMENT_CREATED = "ASSIGNMENT_CREATED";
     public static final String ASSIGNMENT_DELETED = "ASSIGNMENT_DELETED";
     public static final String TASK_SUBMITTED = "TASK_SUBMITTED";
     public static final String ROLE_CHANGED = "ROLE_CHANGED";
+    public static final String TEACHER_REQUEST_APPROVED = "TEACHER_REQUEST_APPROVED";
+    public static final String TEACHER_REQUEST_REJECTED = "TEACHER_REQUEST_REJECTED";
     public static final String USER_DELETED = "USER_DELETED";
 
     private static final int MAX_DETAILS_LENGTH = 1_000;

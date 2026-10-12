@@ -1,27 +1,32 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, ChevronRight, Copy, FileText, GraduationCap, Loader2, ShieldAlert, UserPlus, Users } from 'lucide-react'
+import { ArrowLeft, Check, ChevronRight, Copy, FileText, GraduationCap, Loader2, RefreshCw, ShieldAlert, Users } from 'lucide-react'
 import api, { describeError } from '../api/axios'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
-import { ROLE_STUDENT } from '../constants/roles'
-import { CATEGORY_LABELS, VISIBILITY_LABELS } from '../constants/documents'
+import { ROLE_ADMIN, ROLE_STUDENT } from '../constants/roles'
+import { VISIBILITY_LABELS } from '../constants/documents'
 import Navbar from '../components/Navbar'
+import ConfirmDialog from '../components/ConfirmDialog'
+import ErrorState from '../components/ErrorState'
 import CourseChat from '../components/CourseChat'
 import CourseAssignments from '../components/CourseAssignments'
 import CourseStudents from '../components/CourseStudents'
 import DocumentUpload from '../components/DocumentUpload'
-import { dateFormatter, getFileFormat } from '../utils/fileTypes'
+import DocumentAiBadge from '../components/DocumentAiBadge'
+import ReclassifyButton from '../components/ReclassifyButton'
+import { canDeleteDocument, getFileFormat } from '../utils/fileTypes'
+import { formatDateTime } from '../utils/dates'
+import useDocumentStatus from '../hooks/useDocumentStatus'
+import { isClassifying, withLiveStatus } from '../utils/documentStatus'
 
 const DOCS_PAGE_SIZE = 10
 
 export default function CoursePage() {
   const { id } = useParams()
   const { role } = useAuth()
-  const { notifyError, showSuccess } = useToast()
   const [details, setDetails] = useState(null)
   const [error, setError] = useState(null)
-  const [enrolling, setEnrolling] = useState(false)
   const [docsVersion, setDocsVersion] = useState(0) // Bumped after an upload to reload the list.
 
   const loadDetails = useCallback(() => api.get(`/courses/${id}`).then(({ data }) => setDetails(data)), [id])
@@ -30,19 +35,9 @@ export default function CoursePage() {
     loadDetails().catch((err) => setError(describeError(err)))
   }, [loadDetails])
 
-  const enroll = async () => {
-    setEnrolling(true)
-    try {
-      await api.post(`/courses/${id}/enroll`)
-      await loadDetails()
-      setError(null)
-      setDocsVersion((version) => version + 1)
-      showSuccess('Вы записаны на курс')
-    } catch (err) {
-      notifyError(err)
-    } finally {
-      setEnrolling(false)
-    }
+  const retryDetails = () => {
+    setError(null)
+    loadDetails().catch((err) => setError(describeError(err)))
   }
 
   const course = details?.course
@@ -69,18 +64,17 @@ export default function CoursePage() {
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               {notMember
                 ? (isStudent
-                  ? 'Материалы курса доступны только записанным студентам. Если преподаватель прислал вам эту ссылку, запишитесь на курс.'
+                  ? 'Материалы курса доступны только записанным студентам. Чтобы записаться, откройте ссылку-приглашение от преподавателя.'
                   : 'Курс ведёт другой преподаватель. Вы можете управлять только своими курсами.')
                 : error.message}
             </p>
-            {notMember && isStudent && (
+            {error.status !== 403 && error.status !== 404 && (
               <button
                 type="button"
-                onClick={enroll}
-                disabled={enrolling}
-                className="mt-4 flex items-center gap-2 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60"
+                onClick={retryDetails}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700"
               >
-                {enrolling ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />} Записаться на курс
+                <RefreshCw className="h-4 w-4" /> Повторить
               </button>
             )}
           </div>
@@ -97,7 +91,7 @@ export default function CoursePage() {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   {course.code && <span className="rounded-md bg-indigo-50 dark:bg-indigo-500/10 px-1.5 py-0.5 text-xs font-bold text-indigo-700 dark:text-indigo-300">{course.code}</span>}
-                  <span className="text-xs text-slate-400">Курс № {course.id}</span>
+                  {role === ROLE_ADMIN && <span className="text-xs text-slate-500 dark:text-slate-400">Курс № {course.id}</span>}
                   {details.enrolled && <span className="rounded-md bg-emerald-50 dark:bg-emerald-500/10 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">Вы записаны</span>}
                 </div>
                 <h1 className="mt-1 text-xl font-bold text-slate-900 dark:text-white">{course.title}</h1>
@@ -108,11 +102,11 @@ export default function CoursePage() {
                 </p>
               </div>
               <div className="flex shrink-0 gap-2">
-                {canManage && <CopyLinkButton />}
+                {canManage && <InviteLinkControls courseId={course.id} />}
               </div>
             </section>
 
-            <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
               <div className="space-y-4">
                 {canManage && <DocumentUpload course={course} onUploaded={() => setDocsVersion((version) => version + 1)} />}
                 <CourseDocuments courseId={course.id} version={docsVersion} />
@@ -130,25 +124,99 @@ export default function CoursePage() {
   )
 }
 
-// Teachers share this link with students; for a student who is not enrolled yet it opens the "Записаться" button.
-function CopyLinkButton() {
+/**
+ * The invitation link /join/{code} that teachers share with students - the only way to join a course. "Новая ссылка"
+ * replaces the code, so the old link stops working (e.g. after it leaked).
+ */
+function InviteLinkControls({ courseId }) {
+  const { notifyError, showSuccess } = useToast()
+  const [code, setCode] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
+  const [loadError, setLoadError] = useState('')
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    api.get(`/courses/${courseId}/invite`)
+      .then(({ data }) => {
+        if (cancelled) return
+        setCode(data.inviteCode)
+        setLoadError('')
+      })
+      .catch((err) => !cancelled && setLoadError(describeError(err).message))
+    return () => {
+      cancelled = true
+    }
+  }, [courseId, attempt])
+
   useEffect(() => {
     if (!copied) return undefined
     const timer = setTimeout(() => setCopied(false), 2000)
     return () => clearTimeout(timer)
   }, [copied])
 
+  const link = code ? `${window.location.origin}/join/${code}` : ''
+
+  const copy = () => {
+    if (!navigator.clipboard) {
+      window.prompt('Скопируйте ссылку для студентов:', link)
+      return
+    }
+    navigator.clipboard.writeText(link).then(() => setCopied(true)).catch(() => window.prompt('Скопируйте ссылку для студентов:', link))
+  }
+
+  const regenerate = async () => {
+    setRegenerating(true)
+    try {
+      const { data } = await api.post(`/courses/${courseId}/invite/regenerate`)
+      setCode(data.inviteCode)
+      setConfirming(false)
+      showSuccess('Создана новая ссылка. Старая больше не действует.')
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setRegenerating(false)
+    }
+  }
+
+  const buttonClass = 'flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 px-3.5 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 transition hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60'
+  if (loadError && !code) {
+    return (
+      <ErrorState
+        compact
+        message="Не удалось загрузить ссылку"
+        onRetry={() => {
+          setLoadError('')
+          setAttempt((value) => value + 1)
+        }}
+        className="max-w-xs"
+      />
+    )
+  }
   return (
-    <button
-      type="button"
-      onClick={() => navigator.clipboard?.writeText(window.location.href).then(() => setCopied(true)).catch(() => {})}
-      className="flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 px-3.5 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 transition hover:bg-slate-50 dark:hover:bg-slate-800"
-      title="Ссылка для записи студентов"
-    >
-      {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-      {copied ? 'Скопировано' : 'Ссылка для студентов'}
-    </button>
+    <>
+      <button type="button" onClick={copy} disabled={!code} className={buttonClass} title={link || 'Загрузка ссылки…'}>
+        {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+        {copied ? 'Скопировано' : 'Ссылка для студентов'}
+      </button>
+      <button type="button" onClick={() => setConfirming(true)} disabled={!code} className={buttonClass} title="Сгенерировать новую ссылку" aria-label="Новая ссылка для студентов">
+        <RefreshCw className="h-4 w-4" /> <span className="hidden sm:inline">Новая ссылка</span>
+      </button>
+      {confirming && (
+        <ConfirmDialog
+          title="Сгенерировать новую ссылку?"
+          confirmLabel="Сгенерировать"
+          loading={regenerating}
+          onConfirm={regenerate}
+          onCancel={() => setConfirming(false)}
+        >
+          Текущая ссылка-приглашение сразу перестанет работать. Уже записанные студенты останутся на курсе;
+          новым студентам нужно будет отправить новую ссылку.
+        </ConfirmDialog>
+      )}
+    </>
   )
 }
 
@@ -156,6 +224,8 @@ function CourseDocuments({ courseId, version }) {
   const { notifyError } = useToast()
   const [page, setPage] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [attempt, setAttempt] = useState(0)
 
   const fetchPage = useCallback((number) => api.get('/documents', {
     params: { courseId, page: number, size: DOCS_PAGE_SIZE },
@@ -164,13 +234,32 @@ function CourseDocuments({ courseId, version }) {
   useEffect(() => {
     let cancelled = false
     fetchPage(0)
-      .then((data) => !cancelled && setPage(data))
-      .catch((err) => !cancelled && notifyError(err))
+      .then((data) => {
+        if (cancelled) return
+        setPage(data)
+        setError('')
+      })
+      .catch((err) => !cancelled && setError(describeError(err).message))
       .finally(() => !cancelled && setLoading(false))
     return () => {
       cancelled = true
     }
-  }, [fetchPage, notifyError, version])
+  }, [fetchPage, version, attempt])
+
+  const retry = () => {
+    setError('')
+    setLoading(true)
+    setAttempt((value) => value + 1)
+  }
+
+  const updateDoc = useCallback((id, changes) => setPage((current) => current && ({
+    ...current,
+    content: current.content.map((doc) => (doc.id === id ? { ...doc, ...changes } : doc)),
+  })), [])
+
+  // Rows the AI is still classifying are polled (one request for all of them) and shown live.
+  const pendingDocs = useMemo(() => (page?.content ?? []).filter(isClassifying), [page])
+  const liveStatuses = useDocumentStatus(pendingDocs, { deadlines: false })
 
   const loadMore = async () => {
     setLoading(true)
@@ -190,28 +279,35 @@ function CourseDocuments({ courseId, version }) {
         <FileText className="h-4 w-4 text-indigo-600" /> Документы курса
         {page && <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:text-slate-300">{page.totalElements}</span>}
       </h2>
-      {!page && loading ? (
+      {error ? (
+        <ErrorState title="Не удалось загрузить документы курса" message={error} onRetry={retry} />
+      ) : !page && loading ? (
         <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Загрузка…</div>
       ) : page?.content.length === 0 ? (
         <p className="px-5 py-8 text-center text-sm text-slate-500 dark:text-slate-400">Доступных вам документов в курсе пока нет.</p>
       ) : page && (
         <>
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-            {page.content.map((doc) => {
+            {page.content.map((row) => {
+              const doc = withLiveStatus(row, liveStatuses[row.id])
               const format = getFileFormat(doc)
               const FormatIcon = format.icon
               return (
-                <li key={doc.id}>
-                  <Link to={`/documents/${doc.id}`} className="group flex items-center gap-3 px-5 py-3 transition hover:bg-indigo-50/40 dark:hover:bg-indigo-500/10">
+                <li key={doc.id} className="flex items-center gap-2 pr-3 transition hover:bg-indigo-50/40 dark:hover:bg-indigo-500/10">
+                  <Link to={`/documents/${doc.id}`} state={{ from: `/courses/${courseId}` }} className="group flex min-w-0 flex-1 items-center gap-3 py-3 pl-4 sm:pl-5">
                     <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${format.tile}`}><FormatIcon className="h-4 w-4" /></span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-slate-900 dark:text-white group-hover:text-indigo-700 dark:group-hover:text-indigo-300">{doc.originalFileName}</span>
-                      <span className="block truncate text-xs text-slate-500 dark:text-slate-400">
-                        {CATEGORY_LABELS[doc.category]} · {VISIBILITY_LABELS[doc.visibility]} · {dateFormatter.format(new Date(doc.uploadedAt))}
+                      <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                        <DocumentAiBadge doc={doc} />
+                        <span className="truncate">{VISIBILITY_LABELS[doc.visibility]} · {formatDateTime(doc.uploadedAt)}</span>
                       </span>
                     </span>
                     <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 group-hover:text-indigo-600" />
                   </Link>
+                  {canDeleteDocument(doc) && (
+                    <ReclassifyButton doc={doc} onUpdated={(changes) => updateDoc(doc.id, changes)} compact />
+                  )}
                 </li>
               )
             })}

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, BadgeCheck, BookOpen, CircleAlert, FileUp, Files, FolderLock, GraduationCap, Loader2, LockKeyhole, Mail, Plus, ShieldCheck, User } from 'lucide-react'
-import api from '../api/axios'
+import { ArrowRight, BadgeCheck, BookOpen, CircleAlert, FileUp, Files, FolderLock, GraduationCap, Hourglass, Loader2, LockKeyhole, Mail, Plus, ShieldCheck, User } from 'lucide-react'
+import api, { describeError } from '../api/axios'
+import ErrorState from '../components/ErrorState'
 import { useAuth } from '../context/AuthContext'
-import { ROLES, ROLE_ADMIN, ROLE_LABELS, ROLE_STUDENT } from '../constants/roles'
+import { ROLES, ROLE_ADMIN, ROLE_STUDENT, roleLabel } from '../constants/roles'
 import Navbar from '../components/Navbar'
 import AiChat from '../components/AiChat'
 import MyTasks from '../components/MyTasks'
@@ -24,6 +25,13 @@ export default function Dashboard() {
   const isAdmin = user.role === ROLE_ADMIN
   const access = ACCESS_TEXT[user.role] ?? ACCESS_TEXT.ROLE_STUDENT
   const [documentCount, setDocumentCount] = useState(null) // null while loading, undefined if the request failed
+  // A status change in "Мои задачи": shown in "Ближайшие дедлайны" at once, then that list is reloaded.
+  const [taskStatuses, setTaskStatuses] = useState({})
+  const [deadlinesVersion, setDeadlinesVersion] = useState(0)
+  const onTaskStatusChanged = (task) => {
+    setTaskStatuses((current) => ({ ...current, [task.id]: task.status }))
+    setDeadlinesVersion((value) => value + 1)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -49,7 +57,7 @@ export default function Dashboard() {
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
         <section className="relative overflow-hidden rounded-2xl border border-indigo-100 dark:border-indigo-500/30 bg-white dark:bg-slate-900 shadow-sm">
           <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 via-violet-500 to-cyan-400" />
-          <div className="grid gap-6 px-6 py-7 sm:px-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="grid grid-cols-1 gap-6 px-6 py-7 sm:px-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div>
               <span className="inline-flex items-center gap-2 rounded-full bg-indigo-50 dark:bg-indigo-500/10 px-3 py-1 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
                 <ShieldCheck className="h-3.5 w-3.5" />
@@ -78,10 +86,17 @@ export default function Dashboard() {
             </div>
           </div>
         </section>
+        {isStudent && user.teacherRequested && (
+          <p className="mt-4 flex items-center gap-2 rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200" role="status">
+            <Hourglass className="h-4 w-4 shrink-0" />
+            Заявка на роль преподавателя на рассмотрении. После подтверждения деканатом войдите в систему заново.
+          </p>
+        )}
+
         <section className="mt-6 grid gap-4 md:grid-cols-3">
           <StatusCard icon={Files} iconClass="bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" label="Всего файлов" value={documentCount === null ? '…' : documentCount ?? '—'} description={access.files} />
           <StatusCard icon={LockKeyhole} iconClass="bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" label="Доступ" value={access.access} description={access.hint} />
-          <StatusCard icon={RoleIcon} iconClass="bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400" label="Текущие права доступа" value={ROLE_LABELS[user.role] ?? user.role} description="Доступ определяется вашей ролью" />
+          <StatusCard icon={RoleIcon} iconClass="bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400" label="Текущие права доступа" value={roleLabel(user.role)} description="Доступ определяется вашей ролью" />
         </section>
 
         <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Быстрые действия</h2>
@@ -89,19 +104,19 @@ export default function Dashboard() {
           <QuickAction to="/courses" icon={GraduationCap} title={isAdmin ? 'Все курсы' : 'Мои курсы'} description="Документы, задания и чат с ИИ" accent="violet" />
           <QuickAction to="/documents" icon={FolderLock} title="Хранилище" description={access.files} />
           {isStudent ? (
-            <QuickAction to="/courses" icon={Plus} title="Записаться на курс" description="По ссылке или номеру от преподавателя" accent="indigo" />
+            <QuickAction to="/courses" icon={Plus} title="Записаться на курс" description="По ссылке-приглашению от преподавателя" accent="indigo" />
           ) : isAdmin ? (
-            <QuickAction to="/admin" icon={ShieldCheck} title="Админ-панель" description="Пользователи, роли, курсы, журнал" accent="indigo" />
+            <QuickAction to="/admin" icon={ShieldCheck} title="Панель деканата" description="Пользователи, роли, курсы, журнал" accent="indigo" />
           ) : (
             <QuickAction to="/documents" icon={FileUp} title="Загрузить документ" description="В один из ваших курсов" accent="indigo" />
           )}
         </section>
 
         {isStudent ? (
-          <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <div className="space-y-6">
-              <UpcomingDeadlines />
-              <MyTasks />
+              <UpcomingDeadlines refreshKey={deadlinesVersion} statusOverrides={taskStatuses} />
+              <MyTasks onStatusChanged={onTaskStatusChanged} />
             </div>
             <div className="space-y-6">
               <MyCourses title="Мои курсы" empty="Вы пока не записаны ни на один курс." />
@@ -116,7 +131,7 @@ export default function Dashboard() {
             </div>
           </div>
         ) : !isAdmin && (
-          <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <MyCourses title="Мои курсы" empty="Вы пока не ведёте курсов. Создайте курс на странице «Курсы»." />
             <AiChat
               endpoint="/ai/ask"
@@ -139,7 +154,7 @@ export default function Dashboard() {
 
             <dl className="mt-5 grid gap-4 sm:grid-cols-3">
               <InfoItem icon={Mail} label="Email" value={user.email} />
-              <InfoItem icon={RoleIcon} label="Роль" value={ROLE_LABELS[user.role] ?? user.role} />
+              <InfoItem icon={RoleIcon} label="Роль" value={roleLabel(user.role)} />
               {user.emailVerified !== undefined && (
                 <InfoItem
                   icon={user.emailVerified ? BadgeCheck : CircleAlert}
@@ -157,16 +172,22 @@ export default function Dashboard() {
 
 function MyCourses({ title, empty }) {
   const [courses, setCourses] = useState(null)
+  const [error, setError] = useState('')
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     api.get('/courses', { params: { size: 6 } })
-      .then(({ data }) => !cancelled && setCourses(data))
-      .catch(() => !cancelled && setCourses({ content: [], totalElements: 0 }))
+      .then(({ data }) => {
+        if (cancelled) return
+        setCourses(data)
+        setError('')
+      })
+      .catch((err) => !cancelled && setError(describeError(err).message))
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [attempt])
 
   return (
     <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
@@ -176,7 +197,17 @@ function MyCourses({ title, empty }) {
         </h2>
         <Link to="/courses" className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline">Все курсы</Link>
       </div>
-      {courses === null ? (
+      {error ? (
+        <ErrorState
+          title="Не удалось загрузить курсы"
+          message={error}
+          onRetry={() => {
+            setError('')
+            setCourses(null)
+            setAttempt((value) => value + 1)
+          }}
+        />
+      ) : courses === null ? (
         <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Загрузка…</div>
       ) : courses.content.length === 0 ? (
         <p className="mt-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 px-4 py-6 text-center text-sm text-slate-500 dark:text-slate-400">{empty}</p>
@@ -204,7 +235,7 @@ function InfoItem({ icon: Icon, label, value }) {
         <Icon className="h-4.5 w-4.5" />
       </span>
       <div className="min-w-0">
-        <dt className="text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</dt>
+        <dt className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</dt>
         <dd className="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-white">{value}</dd>
       </div>
     </div>

@@ -18,9 +18,10 @@ import java.util.Set;
 /**
  * Background AI analysis of a document: summarizes its extracted text, lists key topics, and turns the assignments,
  * labs and deadlines it finds into assignments of the document's course, which every enrolled student then gets as
- * a task (see AssignmentService). A document without a course gets only its summary and topics.
+ * a task (see AssignmentService).
  * The AI call runs outside any transaction (it can take a minute); only the final write is transactional.
  * Failures are logged and never propagate: a document is always kept, with or without tasks.
+ * EXAM_ANSWERS documents are never analyzed, however the analysis was requested.
  */
 @Slf4j
 @Service
@@ -46,20 +47,30 @@ public class DocumentAnalysisService {
     /** Automatic analysis after upload; skipped unless the category is in {@link #AUTO_ANALYZED}. */
     @Async(AsyncConfig.AI_EXECUTOR)
     public void analyzeAndCreateTasksAsync(Long documentId) {
-        analyze(documentId, true);
+        analyzeNow(documentId, true);
     }
 
     /** Analysis requested by a user; runs for any category and replaces the document's previous assignments. */
     @Async(AsyncConfig.AI_EXECUTOR)
     public void reanalyzeAsync(Long documentId) {
-        analyze(documentId, false);
+        analyzeNow(documentId, false);
     }
 
-    private void analyze(Long documentId, boolean automatic) {
+    /**
+     * The analysis itself, in the caller's thread. For code that already runs on the AI executor
+     * (DocumentProcessingService): submitting an @Async job from there could wait on the same full queue.
+     * {@code automatic} skips categories outside {@link #AUTO_ANALYZED}. Never throws.
+     */
+    public void analyzeNow(Long documentId, boolean automatic) {
         try {
             AnalysisSource source = documentRepository.findAnalysisSource(documentId).orElse(null);
             if (source == null) {
                 log.info("AI analysis skipped: document {} no longer exists", documentId);
+                return;
+            }
+            if (source.category() == DocumentCategory.EXAM_ANSWERS) {
+                // Never turned into assignments: their titles and deadlines would reach students as tasks.
+                log.info("AI analysis skipped for document {}: EXAM_ANSWERS are never analyzed", documentId);
                 return;
             }
             if (automatic && !AUTO_ANALYZED.contains(source.category())) {

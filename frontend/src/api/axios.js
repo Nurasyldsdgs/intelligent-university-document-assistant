@@ -33,12 +33,13 @@ api.interceptors.response.use(
   },
 )
 
-// Backend messages are in English; map the known ones to Russian for the UI.
+// Fallback for responses without a known code (older backends): English backend messages mapped to Russian.
+// Kept for backward compatibility; CODE_MESSAGES below is consulted first.
 const MESSAGE_TRANSLATIONS = {
   'Invalid email or password': 'Неверный email или пароль',
   'An account with this email already exists': 'Аккаунт с таким email уже существует',
   'ADMIN role cannot be self-assigned':
-    'Роль «Деканат» нельзя выбрать при самостоятельной регистрации. Обратитесь к администратору системы.',
+    'Роль «Деканат» нельзя выбрать при самостоятельной регистрации. Обратитесь в деканат.',
   'This account uses Google sign-in. Please log in with Google.':
     'Этот аккаунт зарегистрирован через Google. Войдите через Google.',
   'Invalid or expired code': 'Неверный или просроченный код',
@@ -59,6 +60,7 @@ const MESSAGE_TRANSLATIONS = {
   'You cannot delete your own account': 'Нельзя удалить собственный аккаунт',
   'Course not found': 'Курс не найден',
   'Task not found': 'Задача не найдена',
+  'Teacher request not found': 'Заявка уже обработана или не найдена',
   'Only TEACHER or ADMIN can upload TEACHER_ONLY documents':
     'Видимость «Только преподаватели» доступна только преподавателям и деканату',
   'courseId is required for COURSE_STUDENTS visibility': 'Для видимости «Студенты курса» выберите курс',
@@ -69,8 +71,8 @@ const MESSAGE_TRANSLATIONS = {
     'Запустить анализ может владелец документа, преподаватель курса или деканат',
   'The document has no extracted text to analyze': 'В документе нет распознанного текста для анализа',
   'You can change only your own tasks': 'Можно менять только свои задачи',
-  'AI assistant is not configured': 'ИИ-ассистент не подключён на сервере. Обратитесь к администратору.',
-  'AI analysis is not configured': 'ИИ-ассистент не подключён на сервере. Обратитесь к администратору.',
+  'AI assistant is not configured': 'ИИ-ассистент не подключён на сервере. Обратитесь в деканат.',
+  'AI analysis is not configured': 'ИИ-ассистент не подключён на сервере. Обратитесь в деканат.',
   'AI assistant is busy, try again later': 'ИИ-ассистент сейчас перегружен. Попробуйте через минуту.',
   'AI analysis queue is full, try again later': 'Очередь ИИ-анализа заполнена. Попробуйте через минуту.',
 }
@@ -78,19 +80,116 @@ const MESSAGE_TRANSLATIONS = {
 export const AI_UNAVAILABLE_MESSAGE = 'ИИ-ассистент временно недоступен. Попробуйте позже.'
 export const FORBIDDEN_MESSAGE = 'У вас нет прав доступа к этому ресурсу.'
 
+const minutesFrom = (data, fallback = 1) => Math.max(1, Math.ceil((Number(data?.retryAfterSeconds) || fallback * 60) / 60))
+// For codes whose backend text is already Russian and specific (file names, limits): keep it, else a fallback.
+const localized = (fallback) => (data) => (/[А-Яа-яЁё]/.test(data?.message ?? '') ? data.message : fallback)
+
 /**
- * Message for any failed request. 503 (AI off, down or overloaded) and 403 get dedicated wording; the backend's
- * own message is used when it is more specific (e.g. "not configured" vs. "busy").
+ * Russian text per backend error code (ErrorCodes.java). Codes are stable, messages are not, so this is consulted
+ * first; a value is either the text or a function of the error body (for retry times and file names).
+ */
+export const CODE_MESSAGES = {
+  // Authentication and accounts
+  INVALID_CREDENTIALS: 'Неверный email или пароль. Проверьте данные или восстановите доступ.',
+  EMAIL_TAKEN: 'Аккаунт с таким email уже существует',
+  EMAIL_NOT_VERIFIED: localized('Email ещё не подтверждён. Введите код из письма или запросите новый.'),
+  EMAIL_ALREADY_VERIFIED: localized('Email уже подтверждён. Войдите в систему.'),
+  OTP_RESEND_COOLDOWN: (data) => `Повторно отправить код можно через ${Math.max(1, Number(data?.retryAfterSeconds) || 60)} с.`,
+  TOO_MANY_LOGIN_ATTEMPTS: (data) => `Слишком много неудачных попыток входа. Попробуйте снова через ${minutesFrom(data, 15)} мин.`,
+  LOGIN_USE_GOOGLE: 'Этот аккаунт зарегистрирован через Google. Войдите через Google.',
+  ADMIN_ROLE_NOT_ALLOWED: 'Роль «Деканат» нельзя выбрать при самостоятельной регистрации. Обратитесь в деканат.',
+  TEACHER_ROLE_PENDING: 'Заявка на роль преподавателя ещё не подтверждена деканатом. До подтверждения вы работаете как студент.',
+  OTP_INVALID: 'Неверный или просроченный код',
+  OTP_EXPIRED: 'Срок действия кода истёк. Запросите новый.',
+  OTP_ATTEMPTS_EXCEEDED: 'Слишком много неудачных попыток. Запросите новый код.',
+  PASSWORD_UNCHANGED: 'Новый пароль должен отличаться от текущего',
+  ACCOUNT_NOT_FOUND: 'Аккаунт больше не существует. Войдите снова.',
+  ACCOUNT_DISABLED: 'Аккаунт заблокирован.',
+  AUTHENTICATION_FAILED: 'Не удалось войти. Попробуйте ещё раз.',
+  AUTHENTICATION_REQUIRED: 'Сессия истекла. Войдите снова.',
+  // Access
+  ACCESS_DENIED: FORBIDDEN_MESSAGE,
+  COURSE_NOT_ENROLLED: 'Вы не записаны на этот курс.',
+  COURSE_NOT_MANAGED: 'Курс ведёт другой преподаватель. Вы можете управлять только своими курсами.',
+  ADMIN_ONLY: 'Это действие доступно только деканату.',
+  CANNOT_CHANGE_OWN_ROLE: 'Нельзя изменить собственную роль',
+  CANNOT_DELETE_SELF: 'Нельзя удалить собственный аккаунт',
+  // Not found
+  USER_NOT_FOUND: 'Пользователь не найден',
+  STUDENT_NOT_FOUND: 'Студент не найден',
+  TEACHER_NOT_FOUND: 'Преподаватель не найден',
+  TEACHER_REQUEST_NOT_FOUND: 'Заявка уже обработана или не найдена',
+  COURSE_NOT_FOUND: 'Курс не найден',
+  DOCUMENT_NOT_FOUND: 'Документ не найден',
+  ASSIGNMENT_NOT_FOUND: 'Задание не найдено',
+  TASK_NOT_FOUND: 'Задача не найдена',
+  SUBMISSION_NOT_FOUND: 'Решение не найдено',
+  ENDPOINT_NOT_FOUND: 'Запрошенный адрес не найден',
+  // Courses
+  COURSE_CREATE_FORBIDDEN: 'Создавать курсы могут только преподаватели и деканат.',
+  COURSE_REQUIRED: 'Выберите курс: каждый документ принадлежит курсу',
+  ENROLL_BY_LINK_ONLY: 'Записаться на курс можно только по ссылке-приглашению преподавателя.',
+  INVITE_INVALID: 'Курс не найден. Ссылка неверна или больше не действует — попросите у преподавателя актуальную.',
+  TOO_MANY_ATTEMPTS: (data) => `Слишком много попыток с неверным кодом. Попробуйте через ${minutesFrom(data, 10)} мин.`,
+  NOT_A_STUDENT: 'Это действие доступно только студентам.',
+  NOT_A_TEACHER: 'Пользователь не является преподавателем',
+  // Tasks and submissions
+  TASK_NOT_OWN: 'Можно менять только свои задачи',
+  TASK_NOT_SUBMITTABLE: 'К этой задаче нельзя прикрепить решение.',
+  // Uploads
+  UPLOAD_FORBIDDEN: localized('Загружать документы курса может только его преподаватель или деканат.'),
+  UPLOAD_EMPTY: localized('Файл пустой'),
+  UPLOAD_TOO_MANY_FILES: localized('Слишком много файлов за один раз'),
+  UPLOAD_UNSUPPORTED_TYPE: localized('Неподдерживаемый формат файла'),
+  UPLOAD_TOO_LARGE: localized('Файл слишком большой (максимум 20 МБ)'),
+  UPLOAD_CONTENT_MISMATCH: 'Содержимое файла не соответствует расширению',
+  UPLOAD_INVALID_ARCHIVE: localized('Файл не является корректным ZIP-архивом'),
+  PREVIEW_NOT_AVAILABLE: 'Предпросмотр недоступен для этого формата',
+  // AI
+  AI_NOT_CONFIGURED: 'ИИ-ассистент не подключён на сервере. Обратитесь в деканат.',
+  AI_BUSY: 'ИИ-ассистент сейчас перегружен. Попробуйте через минуту.',
+  AI_UNAVAILABLE: AI_UNAVAILABLE_MESSAGE,
+  AI_QUEUE_FULL: 'Очередь ИИ-анализа заполнена. Попробуйте через минуту.',
+  AI_NO_TEXT: 'В документе нет распознанного текста для анализа',
+  AI_EXAM_ANSWERS_NOT_ANALYZED: 'Ответы к экзамену не анализируются на задания',
+  // Requests
+  VALIDATION_FAILED: 'Проверьте введённые данные',
+  MALFORMED_REQUEST: 'Некорректные данные запроса',
+  MISSING_PARAMETER: 'В запросе не хватает данных',
+  INVALID_PARAMETER: 'Некорректное значение в запросе',
+  METHOD_NOT_ALLOWED: 'Это действие не поддерживается',
+  SEARCH_QUERY_INVALID: 'Поисковый запрос пуст или слишком длинный (до 200 символов)',
+  SORT_NOT_ALLOWED: 'Нельзя отсортировать по этому полю',
+  TOO_MANY_IDS: 'Слишком много документов в одном запросе',
+  DATA_CONFLICT: 'Такие данные уже существуют',
+  EMAIL_SEND_FAILED: 'Не удалось отправить письмо. Попробуйте позже.',
+  INTERNAL_ERROR: 'Внутренняя ошибка сервера. Попробуйте позже.',
+}
+
+/** Text for an error body by its code, or null when the code is missing or unknown to this client. */
+export function messageForCode(data) {
+  const entry = data?.code ? CODE_MESSAGES[data.code] : undefined
+  if (entry === undefined) return null
+  return typeof entry === 'function' ? entry(data) : entry
+}
+
+/**
+ * Message for any failed request. By code first; without a known code, 503 (AI off, down or overloaded) and 403 get
+ * dedicated wording (an older backend may still send code-less errors).
  */
 export function describeError(error) {
   const status = error?.response?.status
-  const serverMessage = error?.response?.data?.message
+  const data = error?.response?.data
+  const byCode = messageForCode(data)
+  if (byCode) {
+    return { status, message: byCode }
+  }
   if (status === 503) {
-    return { status, message: MESSAGE_TRANSLATIONS[serverMessage] ?? AI_UNAVAILABLE_MESSAGE }
+    return { status, message: MESSAGE_TRANSLATIONS[data?.message] ?? AI_UNAVAILABLE_MESSAGE }
   }
   if (status === 403) {
-    const known = MESSAGE_TRANSLATIONS[serverMessage]
-    return { status, message: known && serverMessage !== 'Access denied' ? known : FORBIDDEN_MESSAGE }
+    const known = MESSAGE_TRANSLATIONS[data?.message]
+    return { status, message: known && known !== MESSAGE_TRANSLATIONS['Access denied'] ? known : FORBIDDEN_MESSAGE }
   }
   return { status, message: getErrorMessage(error) }
 }
@@ -104,6 +203,10 @@ const FIELD_LABELS = {
   role: 'Роль',
 }
 
+/**
+ * Order: field errors (they name the fields), then the code (CODE_MESSAGES), then the old message translations
+ * (kept for code-less responses), then the server's own text, then a generic fallback.
+ */
 export function getErrorMessage(error) {
   if (!error?.response) {
     return error?.code === 'ECONNABORTED'
@@ -117,6 +220,10 @@ export function getErrorMessage(error) {
     return Object.entries(data.fieldErrors)
       .map(([field, message]) => `${FIELD_LABELS[field] ?? field}: ${message}`)
       .join('; ')
+  }
+  const byCode = messageForCode(data)
+  if (byCode) {
+    return byCode
   }
   if (data?.message) {
     return MESSAGE_TRANSLATIONS[data.message] ?? data.message

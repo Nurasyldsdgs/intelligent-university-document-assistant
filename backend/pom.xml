@@ -21,6 +21,7 @@
         <java.version>21</java.version>
         <jjwt.version>0.11.5</jjwt.version>
         <tika.version>2.9.2</tika.version>
+        <aws-sdk.version>2.54.20</aws-sdk.version>
     </properties>
 
     <dependencies>
@@ -100,6 +101,35 @@
         </dependency>
 
         <!-- Lombok -->
+        <!-- Object storage for app.storage.driver=s3 (S3StorageService); unused with the default local driver -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>${aws-sdk.version}</version>
+            <exclusions>
+                <!-- Only the async client needs Netty. -->
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>netty-nio-client</artifactId>
+                </exclusion>
+                <!-- Needs HttpClient 5.6, but Spring Boot 3.2 pins 5.2: it would fail at runtime. -->
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>apache5-client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>apache-client</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- The sync S3Client's HTTP client: the JDK's HttpURLConnection, no third-party libraries to conflict with. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
+            <version>${aws-sdk.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

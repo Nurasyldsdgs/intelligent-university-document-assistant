@@ -1,20 +1,28 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Download, Eye, FolderLock, GraduationCap, Loader2, Lock, MessageSquareText, ShieldCheck, Trash2 } from 'lucide-react'
-import api, { getBlobErrorMessage } from '../api/axios'
+import api, { describeError, getBlobErrorMessage } from '../api/axios'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
+import useConfirm from '../hooks/useConfirm'
 import { ROLE_ADMIN, ROLE_STUDENT } from '../constants/roles'
-import { CATEGORY_LABELS, VISIBILITY_LABELS } from '../constants/documents'
+import { VISIBILITY_LABELS } from '../constants/documents'
 import Navbar from '../components/Navbar'
 import DocumentUpload from '../components/DocumentUpload'
-import { canDeleteDocument, dateFormatter, formatSize, getFileFormat } from '../utils/fileTypes'
+import ErrorState from '../components/ErrorState'
+import useDocumentStatus from '../hooks/useDocumentStatus'
+import { isClassifying, withLiveStatus } from '../utils/documentStatus'
+import DocumentAiBadge from '../components/DocumentAiBadge'
+import ReclassifyButton from '../components/ReclassifyButton'
+import { canDeleteDocument, formatSize, getFileFormat } from '../utils/fileTypes'
+import { formatDateTime } from '../utils/dates'
 
 const PAGE_SIZE = 20
 
 export default function DocumentVaultPage() {
   const { role } = useAuth()
   const { notifyError, showSuccess } = useToast()
+  const [confirm, confirmDialog] = useConfirm()
   const isStudent = role === ROLE_STUDENT
   const isAdmin = role === ROLE_ADMIN
 
@@ -25,10 +33,30 @@ export default function DocumentVaultPage() {
   const fetchPage = useCallback((number) => api.get('/documents', { params: { page: number, size: PAGE_SIZE } })
     .then(({ data }) => data), [])
 
+  // A row changed in place (reclassify), without reloading the list.
+  const updateDoc = useCallback((id, changes) => setPage((current) => current && ({
+    ...current,
+    content: current.content.map((doc) => (doc.id === id ? { ...doc, ...changes } : doc)),
+  })), [])
+
+  const [error, setError] = useState('')
+  // Rows the AI is still classifying are polled (one request for all of them) and shown live.
+  const pendingDocs = useMemo(() => (page?.content ?? []).filter(isClassifying), [page])
+  const liveStatuses = useDocumentStatus(pendingDocs, { deadlines: false })
+
   const reload = useCallback(() => fetchPage(0)
-    .then(setPage)
-    .catch(notifyError)
-    .finally(() => setLoading(false)), [fetchPage, notifyError])
+    .then((data) => {
+      setPage(data)
+      setError('')
+    })
+    .catch((err) => setError(describeError(err).message))
+    .finally(() => setLoading(false)), [fetchPage])
+
+  const retry = () => {
+    setError('')
+    setLoading(true)
+    reload()
+  }
 
   useEffect(() => {
     reload()
@@ -65,7 +93,11 @@ export default function DocumentVaultPage() {
   }
 
   const handleDelete = async (doc) => {
-    if (!window.confirm(`Удалить «${doc.originalFileName}»? Вместе с ним удалятся найденные в нём задания и задачи студентов. Это действие нельзя отменить.`)) return
+    const confirmed = await confirm({
+      title: 'Удалить документ?',
+      message: `«${doc.originalFileName}» будет удалён вместе с найденными в нём заданиями и задачами студентов. Это действие нельзя отменить.`,
+    })
+    if (!confirmed) return
     setBusyId(doc.id)
     try {
       await api.delete(`/documents/${doc.id}`)
@@ -120,11 +152,13 @@ export default function DocumentVaultPage() {
               <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300">{page.totalElements}</span>
             )}
           </div>
-          {!page && loading ? (
+          {error ? (
+            <ErrorState title="Не удалось загрузить документы" message={error} onRetry={retry} />
+          ) : !page && loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500 dark:text-slate-400">
               <Loader2 className="h-4 w-4 animate-spin" /> Загрузка списка…
             </div>
-          ) : !page || page.content.length === 0 ? (
+          ) : page.content.length === 0 ? (
             <div className="flex flex-col items-center py-16 text-center">
               <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-400">
                 <Lock className="h-7 w-7" />
@@ -136,7 +170,20 @@ export default function DocumentVaultPage() {
             </div>
           ) : (
             <>
-              <div className="overflow-x-auto">
+              {/* Below md: cards instead of the wide table. */}
+              <ul className="divide-y divide-slate-100 dark:divide-slate-800 md:hidden">
+                {page.content.map((doc) => (
+                  <DocumentCard
+                    key={doc.id}
+                    doc={withLiveStatus(doc, liveStatuses[doc.id])}
+                    busy={busyId === doc.id}
+                    onDownload={handleDownload}
+                    onDelete={handleDelete}
+                    onUpdated={updateDoc}
+                  />
+                ))}
+              </ul>
+              <div className="hidden overflow-x-auto md:block">
                 <table className="w-full min-w-[960px] text-left text-sm">
                   <thead className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/50 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     <tr>
@@ -152,10 +199,11 @@ export default function DocumentVaultPage() {
                     {page.content.map((doc) => (
                       <DocumentRow
                         key={doc.id}
-                        doc={doc}
+                        doc={withLiveStatus(doc, liveStatuses[doc.id])}
                         busy={busyId === doc.id}
                         onDownload={handleDownload}
                         onDelete={handleDelete}
+                        onUpdated={updateDoc}
                       />
                     ))}
                   </tbody>
@@ -175,13 +223,14 @@ export default function DocumentVaultPage() {
           )}
         </section>
       </main>
+      {confirmDialog}
     </div>
   )
 }
 
 const actionClass = 'flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-all duration-200 disabled:opacity-60'
 
-function DocumentRow({ doc, busy, onDownload, onDelete }) {
+function DocumentRow({ doc, busy, onDownload, onDelete, onUpdated }) {
   const format = getFileFormat(doc)
   const FormatIcon = format.icon
   return (
@@ -197,7 +246,7 @@ function DocumentRow({ doc, busy, onDownload, onDelete }) {
             </span>
             <span className="mt-1 flex flex-wrap items-center gap-1">
               <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset ${format.badge}`}>{format.label}</span>
-              <span className="rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:text-slate-300">{CATEGORY_LABELS[doc.category] ?? doc.category}</span>
+              <DocumentAiBadge doc={doc} />
               {doc.courseCode && (
                 <span className="inline-flex items-center gap-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
                   <GraduationCap className="h-2.5 w-2.5" /> {doc.courseCode}
@@ -208,7 +257,7 @@ function DocumentRow({ doc, busy, onDownload, onDelete }) {
         </Link>
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-slate-600 dark:text-slate-300">{formatSize(doc.fileSize)}</td>
-      <td className="whitespace-nowrap px-4 py-3 text-slate-600 dark:text-slate-300">{dateFormatter.format(new Date(doc.uploadedAt))}</td>
+      <td className="whitespace-nowrap px-4 py-3 text-slate-600 dark:text-slate-300">{formatDateTime(doc.uploadedAt)}</td>
       <td className="max-w-[200px] px-4 py-3">
         <span className="block truncate text-slate-700 dark:text-slate-200" title={doc.ownerFullName}>{doc.ownerEmail}</span>
         {doc.isOwner && <span className="mt-0.5 block text-xs text-indigo-600 dark:text-indigo-400">Вы</span>}
@@ -233,6 +282,9 @@ function DocumentRow({ doc, busy, onDownload, onDelete }) {
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Скачать
           </button>
           {canDeleteDocument(doc) && (
+            <ReclassifyButton doc={doc} onUpdated={(changes) => onUpdated(doc.id, changes)} />
+          )}
+          {canDeleteDocument(doc) && (
             <button type="button" onClick={() => onDelete(doc)} disabled={busy} className={`${actionClass} border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10`}>
               <Trash2 className="h-3.5 w-3.5" /> Удалить
             </button>
@@ -240,5 +292,56 @@ function DocumentRow({ doc, busy, onDownload, onDelete }) {
         </div>
       </td>
     </tr>
+  )
+}
+
+const iconActionClass = 'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-all duration-200 disabled:opacity-60'
+
+function DocumentCard({ doc, busy, onDownload, onDelete, onUpdated }) {
+  const format = getFileFormat(doc)
+  const FormatIcon = format.icon
+  return (
+    <li className="px-4 py-3">
+      <Link to={`/documents/${doc.id}`} className="group flex min-w-0 items-start gap-3 rounded-lg focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-100 dark:focus-visible:ring-indigo-500/30">
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${format.tile}`}>
+          <FormatIcon className="h-4 w-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-slate-900 dark:text-white group-hover:text-indigo-700 dark:group-hover:text-indigo-300" title={doc.originalFileName}>
+            {doc.originalFileName}
+          </span>
+          <span className="mt-1 flex flex-wrap items-center gap-1">
+            <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset ${format.badge}`}>{format.label}</span>
+            <DocumentAiBadge doc={doc} />
+            {doc.courseCode && (
+              <span className="inline-flex items-center gap-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
+                <GraduationCap className="h-2.5 w-2.5" /> {doc.courseCode}
+              </span>
+            )}
+          </span>
+          <span className="mt-1 block truncate text-xs text-slate-600 dark:text-slate-300">
+            {formatDateTime(doc.uploadedAt)} · {formatSize(doc.fileSize)}
+          </span>
+        </span>
+      </Link>
+      <div className="mt-2 flex flex-wrap justify-end gap-2">
+        {doc.hasExtractedText && (
+          <Link to={`/documents/${doc.id}?tab=chat`} aria-label="Чат с ИИ" title="Чат с ИИ" className={`${iconActionClass} border-violet-200 dark:border-violet-500/30 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-500/10`}>
+            <MessageSquareText className="h-4 w-4" />
+          </Link>
+        )}
+        <button type="button" onClick={() => onDownload(doc)} disabled={busy} aria-label="Скачать" title="Скачать" className={`${iconActionClass} border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800`}>
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+        </button>
+        {canDeleteDocument(doc) && (
+          <ReclassifyButton doc={doc} onUpdated={(changes) => onUpdated(doc.id, changes)} compact />
+        )}
+        {canDeleteDocument(doc) && (
+          <button type="button" onClick={() => onDelete(doc)} disabled={busy} aria-label="Удалить" title="Удалить" className={`${iconActionClass} border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10`}>
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+    </li>
   )
 }

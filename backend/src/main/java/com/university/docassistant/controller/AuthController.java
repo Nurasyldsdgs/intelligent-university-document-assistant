@@ -9,7 +9,9 @@ import com.university.docassistant.dto.AuthDtos.ResendVerificationRequest;
 import com.university.docassistant.dto.AuthDtos.ResetPasswordRequest;
 import com.university.docassistant.dto.AuthDtos.VerifyEmailRequest;
 import com.university.docassistant.dto.AuthDtos.VerifyOtpRequest;
+import com.university.docassistant.security.ClientIpResolver;
 import com.university.docassistant.service.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -25,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final ClientIpResolver clientIpResolver;
 
     @PostMapping("/register")
     public ResponseEntity<MessageResponse> register(@Valid @RequestBody RegisterRequest request) {
@@ -42,8 +45,8 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-        return ResponseEntity.ok(authService.login(request));
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
+        return ResponseEntity.ok(authService.login(request, clientIpResolver.resolve(http)));
     }
 
     @PostMapping("/forgot-password")

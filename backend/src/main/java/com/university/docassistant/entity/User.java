@@ -12,6 +12,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
+import org.hibernate.annotations.ColumnDefault;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -53,6 +54,14 @@ public class User {
     @Column(name = "is_email_verified", nullable = false)
     @Builder.Default
     private boolean emailVerified = false;
+
+    /**
+     * Asked for the teacher role at registration. The account stays ROLE_STUDENT until ADMIN (Деканат) approves;
+     * existing rows get false.
+     */
+    @Column(name = "teacher_requested", nullable = false)
+    @ColumnDefault("false")
+    private boolean teacherRequested;
 
     @Embedded
     @AttributeOverride(name = "code", column = @Column(name = "reset_otp"))

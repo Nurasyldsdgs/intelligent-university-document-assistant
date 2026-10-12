@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import FullScreenLoader from '../components/FullScreenLoader'
+import { takePostLoginRedirect } from '../utils/postLoginRedirect'
 
 export default function OAuth2RedirectHandler() {
   const [searchParams] = useSearchParams()
@@ -23,7 +24,7 @@ export default function OAuth2RedirectHandler() {
     }
 
     loginWithToken(token)
-      .then(() => navigate('/dashboard', { replace: true }))
+      .then(() => navigate(takePostLoginRedirect() ?? '/dashboard', { replace: true }))
       .catch(() => navigate('/login', { replace: true, state: { oauthError: 'profile_failed' } }))
   }, [searchParams, navigate, loginWithToken])
 

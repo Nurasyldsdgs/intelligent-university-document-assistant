@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { ArrowLeft, KeyRound, Lock, Mail, RotateCw, ShieldCheck, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { getErrorMessage } from '../api/axios'
 import { Alert, OtpInput, SubmitButton, TextField } from './FormControls'
 import { emptyOtp } from '../constants/otp'
+import useDialogFocus from '../hooks/useDialogFocus'
 
 const RESEND_COOLDOWN_SECONDS = 60
 const STEPS = [
@@ -27,13 +28,10 @@ export default function ForgotPasswordModal({ initialEmail = '', onClose, onSucc
 
   const otpValue = otp.join('')
 
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+  const titleId = useId()
+  const dialogRef = useRef(null)
+  // Escape and the backdrop do not close it while a request is running.
+  useDialogFocus(dialogRef, { onClose, busy: loading })
 
   useEffect(() => {
     if (cooldown <= 0) return undefined
@@ -109,18 +107,20 @@ export default function ForgotPasswordModal({ initialEmail = '', onClose, onSucc
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
+        if (event.target === event.currentTarget && !loading) onClose()
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="reset-title"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 p-6 shadow-2xl"
       >
         <div className="mb-5 flex items-start justify-between">
           <div>
-            <h2 id="reset-title" className="text-lg font-semibold text-slate-900 dark:text-white">
+            <h2 id={titleId} className="text-lg font-semibold text-slate-900 dark:text-white">
               Восстановление пароля
             </h2>
             <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">Шаг {step + 1} из {STEPS.length}</p>
@@ -128,7 +128,7 @@ export default function ForgotPasswordModal({ initialEmail = '', onClose, onSucc
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 dark:text-slate-500 transition hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300"
+            className="rounded-lg p-1.5 text-slate-500 dark:text-slate-400 transition hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300"
             aria-label="Закрыть"
           >
             <X className="h-5 w-5" />
@@ -140,12 +140,12 @@ export default function ForgotPasswordModal({ initialEmail = '', onClose, onSucc
             <li key={title} className="flex flex-1 items-center gap-2">
               <span
                 className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm transition ${
-                  index <= step ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500'
+                  index <= step ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
                 }`}
               >
                 <Icon className="h-4 w-4" />
               </span>
-              <span className={`text-xs font-medium ${index <= step ? 'text-slate-900 dark:text-white' : 'text-slate-400 dark:text-slate-500'}`}>
+              <span className={`text-xs font-medium ${index <= step ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400'}`}>
                 {title}
               </span>
               {index < STEPS.length - 1 && (

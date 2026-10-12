@@ -7,6 +7,7 @@ import com.university.docassistant.entity.Document;
 import com.university.docassistant.entity.Role;
 import com.university.docassistant.entity.User;
 import com.university.docassistant.exception.ApiException;
+import com.university.docassistant.exception.ErrorCodes;
 import com.university.docassistant.repository.DocumentChunkRepository;
 import com.university.docassistant.repository.DocumentChunkRepository.ChunkHit;
 import com.university.docassistant.security.AccessControlService;
@@ -42,7 +43,7 @@ class DocumentQnaServiceTest {
     private final AccessControlService access = mock(AccessControlService.class);
     private final AiClientService ai = mock(AiClientService.class);
     private final DocumentQnaService service = new DocumentQnaService(documentService, chunks, access, ai,
-            new AiProperties(true, "key", "m", "http://x", Duration.ofSeconds(1), Duration.ofSeconds(1), 1, 1, 1, 2));
+            new AiProperties(true, "key", "m", "http://x", Duration.ofSeconds(1), Duration.ofSeconds(1), 1, 1, 1, 2, 1));
 
     private final Document document = Document.builder().id(7L).textSnippet("Силлабус").build();
     private final User student = User.builder().id(5L).email(EMAIL).role(Role.ROLE_STUDENT).build();
@@ -146,7 +147,7 @@ class DocumentQnaServiceTest {
 
     @Test
     void accessDeniedComesBeforeAnythingElse() {
-        when(documentService.getViewable(9L, EMAIL)).thenThrow(ApiException.forbidden("Access denied"));
+        when(documentService.getViewable(9L, EMAIL)).thenThrow(ApiException.forbidden(ErrorCodes.ACCESS_DENIED, "Access denied"));
 
         assertThatThrownBy(() -> service.askDocument(9L, QUESTION, EMAIL))
                 .isInstanceOfSatisfying(ApiException.class, ex -> assertThat(ex.getStatus()).isEqualTo(HttpStatus.FORBIDDEN));
@@ -197,7 +198,7 @@ class DocumentQnaServiceTest {
     @Test
     void courseOfOthersIsRefusedBeforeRetrieval() {
         when(access.authorizeCourse(student, 3L, Permission.ASK_AI))
-                .thenThrow(ApiException.forbidden("You are not enrolled in this course"));
+                .thenThrow(ApiException.forbidden(ErrorCodes.COURSE_NOT_ENROLLED, "You are not enrolled in this course"));
 
         assertThatThrownBy(() -> service.askCourse(3L, QUESTION, EMAIL))
                 .isInstanceOfSatisfying(ApiException.class, ex -> assertThat(ex.getStatus()).isEqualTo(HttpStatus.FORBIDDEN));
@@ -207,7 +208,7 @@ class DocumentQnaServiceTest {
 
     @Test
     void unknownCourseGives404() {
-        when(access.authorizeCourse(student, 4L, Permission.ASK_AI)).thenThrow(ApiException.notFound("Course not found"));
+        when(access.authorizeCourse(student, 4L, Permission.ASK_AI)).thenThrow(ApiException.notFound(ErrorCodes.COURSE_NOT_FOUND, "Course not found"));
 
         assertThatThrownBy(() -> service.askCourse(4L, QUESTION, EMAIL))
                 .isInstanceOfSatisfying(ApiException.class, ex -> assertThat(ex.getStatus()).isEqualTo(HttpStatus.NOT_FOUND));

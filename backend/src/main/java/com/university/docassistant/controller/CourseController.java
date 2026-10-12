@@ -1,17 +1,22 @@
 package com.university.docassistant.controller;
 
 import com.university.docassistant.dto.AuthDtos.MessageResponse;
+import com.university.docassistant.dto.BatchImportResponse;
 import com.university.docassistant.dto.CourseDtos.AssignTeacherRequest;
 import com.university.docassistant.dto.CourseDtos.CourseDetailsResponse;
 import com.university.docassistant.dto.CourseDtos.CourseResponse;
 import com.university.docassistant.dto.CourseDtos.CreateCourseRequest;
 import com.university.docassistant.dto.CourseDtos.EnrollRequest;
+import com.university.docassistant.dto.CourseDtos.InviteCodeResponse;
+import com.university.docassistant.dto.CourseDtos.JoinCourseRequest;
+import com.university.docassistant.dto.CourseDtos.JoinCourseResponse;
 import com.university.docassistant.dto.CourseDtos.StudentResponse;
 import com.university.docassistant.dto.DocumentAnswerResponse;
 import com.university.docassistant.dto.DocumentQuestionRequest;
 import com.university.docassistant.dto.PageResponse;
 import com.university.docassistant.service.CourseService;
 import com.university.docassistant.service.DocumentQnaService;
+import com.university.docassistant.service.DocumentService;
 import com.university.docassistant.util.SortValidator;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +34,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Set;
@@ -43,6 +49,7 @@ public class CourseController {
 
     private final CourseService courseService;
     private final DocumentQnaService documentQnaService;
+    private final DocumentService documentService;
 
     @PostMapping
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
@@ -51,10 +58,13 @@ public class CourseController {
         return ResponseEntity.status(HttpStatus.CREATED).body(courseService.create(request, principal.getUsername()));
     }
 
+    /** {@code q}: optional title or code search (2+ characters) within the user's courses. */
     @GetMapping
-    public PageResponse<CourseResponse> list(@PageableDefault(size = 20, sort = "title") Pageable pageable,
+    public PageResponse<CourseResponse> list(@RequestParam(value = "q", required = false) String query,
+                                             @PageableDefault(size = 20, sort = "title") Pageable pageable,
                                              @AuthenticationPrincipal UserDetails principal) {
-        return courseService.listMine(principal.getUsername(), SortValidator.requireSortable(pageable, SORTABLE_FIELDS));
+        return courseService.listMine(principal.getUsername(), query,
+                SortValidator.requireSortable(pageable, SORTABLE_FIELDS));
     }
 
     @GetMapping("/{id}")
@@ -62,13 +72,41 @@ public class CourseController {
         return courseService.details(id, principal.getUsername());
     }
 
-    /** Body is optional: without {@code studentId} the current student enrolls themselves. */
+    /** A student joins a course with the code from the teacher's invitation link; returns the course id. */
+    @PostMapping("/join")
+    public JoinCourseResponse join(@Valid @RequestBody JoinCourseRequest request,
+                                   @AuthenticationPrincipal UserDetails principal) {
+        return new JoinCourseResponse(courseService.join(request.code(), principal.getUsername()));
+    }
+
+    /** The course's invitation code; for its teacher and ADMIN. */
+    @GetMapping("/{id}/invite")
+    public InviteCodeResponse inviteCode(@PathVariable Long id, @AuthenticationPrincipal UserDetails principal) {
+        return new InviteCodeResponse(courseService.inviteCode(id, principal.getUsername()));
+    }
+
+    /** A new invitation code; the old link stops working immediately. */
+    @PostMapping("/{id}/invite/regenerate")
+    public InviteCodeResponse regenerateInviteCode(@PathVariable Long id,
+                                                   @AuthenticationPrincipal UserDetails principal) {
+        return new InviteCodeResponse(courseService.regenerateInviteCode(id, principal.getUsername()));
+    }
+
+    /** The course's teacher or ADMIN enrolls the student {@code studentId}; students join by invitation code. */
     @PostMapping("/{id}/enroll")
     public MessageResponse enroll(@PathVariable Long id,
                                   @RequestBody(required = false) EnrollRequest request,
                                   @AuthenticationPrincipal UserDetails principal) {
         courseService.enroll(id, request != null ? request.studentId() : null, principal.getUsername());
         return new MessageResponse("Enrolled");
+    }
+
+    /** The course's ZIP imports, newest first (the order is fixed, so {@code sort} is ignored); teacher and ADMIN. */
+    @GetMapping("/{id}/imports")
+    public PageResponse<BatchImportResponse> imports(@PathVariable Long id,
+                                                     @PageableDefault(size = 20) Pageable pageable,
+                                                     @AuthenticationPrincipal UserDetails principal) {
+        return documentService.imports(id, principal.getUsername(), pageable);
     }
 
     /** The course's students; for its teacher and ADMIN. */

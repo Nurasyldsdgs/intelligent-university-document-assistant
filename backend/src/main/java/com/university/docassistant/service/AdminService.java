@@ -3,10 +3,12 @@ package com.university.docassistant.service;
 import com.university.docassistant.dto.AdminDtos.AdminStatsResponse;
 import com.university.docassistant.dto.AdminDtos.AuditLogResponse;
 import com.university.docassistant.dto.AdminDtos.AdminUserResponse;
+import com.university.docassistant.dto.AdminDtos.TeacherRequestResponse;
 import com.university.docassistant.dto.PageResponse;
 import com.university.docassistant.entity.Role;
 import com.university.docassistant.entity.User;
 import com.university.docassistant.exception.ApiException;
+import com.university.docassistant.exception.ErrorCodes;
 import com.university.docassistant.repository.AssignmentRepository;
 import com.university.docassistant.repository.AuditLogRepository;
 import com.university.docassistant.repository.CourseRepository;
@@ -15,10 +17,14 @@ import com.university.docassistant.repository.EnrollmentRepository;
 import com.university.docassistant.repository.TaskRepository;
 import com.university.docassistant.repository.TaskSubmissionRepository;
 import com.university.docassistant.repository.UserRepository;
+import com.university.docassistant.service.storage.StorageService;
+import com.university.docassistant.util.LikePatterns;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -41,11 +47,20 @@ public class AdminService {
     private final EnrollmentRepository enrollmentRepository;
     private final AuditLogRepository auditLogRepository;
     private final AuditService auditService;
-    private final FileStorageService fileStorageService;
+    private final StorageService storageService;
 
+    /**
+     * Users by id, a page at a time. {@code query} (2+ characters, case-insensitive) matches email or name;
+     * {@code role} narrows to one role (e.g. teachers for "assign a course").
+     */
     @Transactional(readOnly = true)
-    public List<AdminUserResponse> listUsers() {
-        return userRepository.findAll(Sort.by("id")).stream().map(AdminService::toResponse).toList();
+    public PageResponse<AdminUserResponse> listUsers(String query, Role role, Pageable pageable) {
+        Pageable byId = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), Sort.by("id"));
+        String pattern = LikePatterns.contains(query);
+        Page<User> users = pattern == null
+                ? (role == null ? userRepository.findAll(byId) : userRepository.findByRole(role, byId))
+                : (role == null ? userRepository.search(pattern, byId) : userRepository.searchByRole(role, pattern, byId));
+        return PageResponse.of(users.map(AdminService::toResponse));
     }
 
     /**
@@ -57,11 +72,11 @@ public class AdminService {
     @Transactional
     public AdminUserResponse updateRole(Long id, Role role, String adminEmail) {
         User user = userRepository.findById(id)
-                .orElseThrow(() -> ApiException.notFound("User not found"));
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.USER_NOT_FOUND, "User not found"));
 
         // An admin demoting themselves could leave the system without any admin.
         if (user.getEmail().equals(adminEmail) && role != Role.ROLE_ADMIN) {
-            throw ApiException.badRequest("You cannot change your own role");
+            throw ApiException.badRequest(ErrorCodes.CANNOT_CHANGE_OWN_ROLE, "You cannot change your own role");
         }
 
         if (user.getRole() != role) {
@@ -75,9 +90,53 @@ public class AdminService {
             auditService.record(adminEmail, AuditService.ROLE_CHANGED,
                     user.getEmail() + ": " + user.getRole() + " -> " + role);
             user.setRole(role);
+            if (role != Role.ROLE_STUDENT) {
+                user.setTeacherRequested(false); // A pending request is settled by any promotion.
+            }
             userRepository.save(user);
         }
         return toResponse(user);
+    }
+
+    /** Students waiting for the teacher role, oldest request first. */
+    @Transactional(readOnly = true)
+    public PageResponse<TeacherRequestResponse> teacherRequests(Pageable pageable) {
+        Pageable oldestFirst = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(),
+                Sort.by("createdAt", "id"));
+        return PageResponse.of(userRepository.findByTeacherRequestedTrueAndRole(Role.ROLE_STUDENT, oldestFirst)
+                .map(user -> new TeacherRequestResponse(user.getId(), user.getFullName(), user.getEmail(),
+                        user.isEmailVerified(), user.getCreatedAt())));
+    }
+
+    /**
+     * Grants the requested teacher role through {@link #updateRole}, so it has the same effects as any role change:
+     * the student's courses and tasks are dropped and their current token stops working (they log in again).
+     */
+    @Transactional
+    public AdminUserResponse approveTeacherRequest(Long id, String adminEmail) {
+        User user = pendingTeacherRequest(id);
+        AdminUserResponse response = updateRole(id, Role.ROLE_TEACHER, adminEmail);
+        auditService.record(adminEmail, AuditService.TEACHER_REQUEST_APPROVED, user.getEmail());
+        return response;
+    }
+
+    /** Closes the request; the account stays ROLE_STUDENT with all its courses. */
+    @Transactional
+    public AdminUserResponse rejectTeacherRequest(Long id, String adminEmail) {
+        User user = pendingTeacherRequest(id);
+        user.setTeacherRequested(false);
+        userRepository.save(user);
+        auditService.record(adminEmail, AuditService.TEACHER_REQUEST_REJECTED, user.getEmail());
+        log.info("Admin {} rejected the teacher role request of {}", adminEmail, user.getEmail());
+        return toResponse(user);
+    }
+
+    private User pendingTeacherRequest(Long id) {
+        User user = userRepository.findById(id).orElseThrow(() -> ApiException.notFound(ErrorCodes.USER_NOT_FOUND, "User not found"));
+        if (!user.isTeacherRequested() || user.getRole() != Role.ROLE_STUDENT) {
+            throw ApiException.notFound(ErrorCodes.TEACHER_REQUEST_NOT_FOUND, "Teacher request not found");
+        }
+        return user;
     }
 
     /**
@@ -89,10 +148,10 @@ public class AdminService {
     @Transactional
     public void deleteUser(Long userId, String adminEmail) {
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> ApiException.notFound("User not found"));
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.USER_NOT_FOUND, "User not found"));
 
         if (user.getEmail().equals(adminEmail)) {
-            throw ApiException.badRequest("You cannot delete your own account");
+            throw ApiException.badRequest(ErrorCodes.CANNOT_DELETE_SELF, "You cannot delete your own account");
         }
 
         List<String> storedFileNames = new ArrayList<>(documentRepository.findStoredFileNamesByOwnerId(userId));
@@ -113,7 +172,7 @@ public class AdminService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                storedFileNames.forEach(fileStorageService::delete);
+                storedFileNames.forEach(storageService::delete);
             }
         });
         log.info("Admin {} deleted user {} with {} document(s)", adminEmail, user.getEmail(), storedFileNames.size());

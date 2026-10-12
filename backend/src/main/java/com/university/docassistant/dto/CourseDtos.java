@@ -22,6 +22,23 @@ public final class CourseDtos {
     }
 
     /** Without {@code studentId} the current user enrolls themselves. */
+    /** Body of POST /courses/join: the code from the invitation link /join/{code}. */
+    public record JoinCourseRequest(
+            @NotBlank(message = "Укажите код приглашения") @Size(max = 200) String code
+    ) {
+    }
+
+    public record JoinCourseResponse(
+            Long courseId
+    ) {
+    }
+
+    /** Only for the course's teacher and ADMIN; students never receive it. */
+    public record InviteCodeResponse(
+            String inviteCode
+    ) {
+    }
+
     public record EnrollRequest(
             Long studentId
     ) {

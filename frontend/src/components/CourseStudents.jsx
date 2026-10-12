@@ -1,23 +1,61 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2, UserMinus, Users } from 'lucide-react'
-import api from '../api/axios'
+import api, { describeError } from '../api/axios'
 import { useToast } from '../context/ToastContext'
+import useConfirm from '../hooks/useConfirm'
+import ErrorState from './ErrorState'
+
+const PAGE_SIZE = 20
 
 /** The course's students, for its teacher and ADMIN; removing a student also removes their tasks of the course. */
 export default function CourseStudents({ courseId, onChange }) {
   const { notifyError, showSuccess } = useToast()
+  const [confirm, confirmDialog] = useConfirm()
   const [page, setPage] = useState(null)
   const [busyId, setBusyId] = useState(null)
+  const [error, setError] = useState('')
+  const [attempt, setAttempt] = useState(0)
 
-  const load = useCallback(() => api.get(`/courses/${courseId}/students`, { params: { size: 100 } })
-    .then(({ data }) => setPage(data)), [courseId])
+  const [loadingMore, setLoadingMore] = useState(false)
+
+  const fetchPage = useCallback((number) => api.get(`/courses/${courseId}/students`, { params: { page: number, size: PAGE_SIZE } })
+    .then(({ data }) => data), [courseId])
+
+  // The first page; after an unenrollment the list starts over from it.
+  const load = useCallback(() => fetchPage(0).then((data) => {
+    setPage(data)
+    setError('')
+  }), [fetchPage])
+
+  const loadMore = async () => {
+    setLoadingMore(true)
+    try {
+      const next = await fetchPage(page.page + 1)
+      setPage((current) => ({ ...next, content: [...current.content, ...next.content] }))
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   useEffect(() => {
-    load().catch(notifyError)
-  }, [load, notifyError])
+    load().catch((err) => setError(describeError(err).message))
+  }, [load, attempt])
+
+  const retry = () => {
+    setError('')
+    setPage(null)
+    setAttempt((value) => value + 1)
+  }
 
   const remove = async (student) => {
-    if (!window.confirm(`Отчислить ${student.fullName || student.email} с курса? Его задачи по курсу будут удалены.`)) return
+    const confirmed = await confirm({
+      title: 'Отчислить студента?',
+      message: `${student.fullName || student.email} будет отчислен с курса, его задачи по курсу будут удалены.`,
+      confirmLabel: 'Отчислить',
+    })
+    if (!confirmed) return
     setBusyId(student.id)
     try {
       await api.delete(`/courses/${courseId}/students/${student.id}`)
@@ -37,7 +75,9 @@ export default function CourseStudents({ courseId, onChange }) {
         <Users className="h-4 w-4 text-indigo-600" /> Студенты курса
         {page && <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:text-slate-300">{page.totalElements}</span>}
       </h2>
-      {!page ? (
+      {error ? (
+        <ErrorState title="Не удалось загрузить список студентов" message={error} onRetry={retry} />
+      ) : !page ? (
         <div className="flex items-center justify-center gap-2 py-6 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Загрузка…</div>
       ) : page.content.length === 0 ? (
         <p className="px-5 py-6 text-center text-sm text-slate-500 dark:text-slate-400">Пока никто не записан. Отправьте студентам ссылку на курс.</p>
@@ -55,6 +95,7 @@ export default function CourseStudents({ courseId, onChange }) {
                 disabled={busyId === student.id}
                 className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 transition hover:border-red-200 hover:text-red-600 disabled:opacity-60"
                 title="Отчислить с курса"
+                aria-label={`Отчислить с курса: ${student.fullName || student.email}`}
               >
                 {busyId === student.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserMinus className="h-3.5 w-3.5" />}
               </button>
@@ -62,6 +103,17 @@ export default function CourseStudents({ courseId, onChange }) {
           ))}
         </ul>
       )}
+      {page && !error && !page.last && (
+        <button
+          type="button"
+          onClick={loadMore}
+          disabled={loadingMore}
+          className="flex w-full items-center justify-center gap-2 border-t border-slate-100 dark:border-slate-800 py-2.5 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60"
+        >
+          {loadingMore && <Loader2 className="h-4 w-4 animate-spin" />} Показать ещё
+        </button>
+      )}
+      {confirmDialog}
     </section>
   )
 }

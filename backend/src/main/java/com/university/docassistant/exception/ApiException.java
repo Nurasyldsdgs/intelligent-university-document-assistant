@@ -3,9 +3,12 @@ package com.university.docassistant.exception;
 import lombok.Getter;
 import org.springframework.http.HttpStatus;
 
+import java.util.Objects;
+
 /**
- * Business error that maps directly to an HTTP status and a client-facing message.
- * {@code code} is an optional machine-readable identifier the frontend can branch on.
+ * Business error that maps directly to an HTTP status, a stable machine-readable {@code code} from
+ * {@link ErrorCodes} and a client-facing message. There is no way to create one without a code: clients branch and
+ * translate by code, never by message text.
  */
 @Getter
 public class ApiException extends RuntimeException {
@@ -14,35 +17,35 @@ public class ApiException extends RuntimeException {
     private final String code;
     private final Long retryAfterSeconds;
 
-    public ApiException(HttpStatus status, String message) {
-        this(status, message, null, null);
-    }
-
     public ApiException(HttpStatus status, String message, String code, Long retryAfterSeconds) {
         super(message);
         this.status = status;
-        this.code = code;
+        this.code = Objects.requireNonNull(code, "ApiException needs an ErrorCodes code");
         this.retryAfterSeconds = retryAfterSeconds;
     }
 
-    public static ApiException badRequest(String message) {
-        return new ApiException(HttpStatus.BAD_REQUEST, message);
+    public static ApiException of(HttpStatus status, String code, String message) {
+        return new ApiException(status, message, code, null);
     }
 
-    public static ApiException unauthorized(String message) {
-        return new ApiException(HttpStatus.UNAUTHORIZED, message);
+    public static ApiException badRequest(String code, String message) {
+        return of(HttpStatus.BAD_REQUEST, code, message);
     }
 
-    public static ApiException forbidden(String message) {
-        return new ApiException(HttpStatus.FORBIDDEN, message);
+    public static ApiException unauthorized(String code, String message) {
+        return of(HttpStatus.UNAUTHORIZED, code, message);
     }
 
-    public static ApiException notFound(String message) {
-        return new ApiException(HttpStatus.NOT_FOUND, message);
+    public static ApiException forbidden(String code, String message) {
+        return of(HttpStatus.FORBIDDEN, code, message);
     }
 
-    public static ApiException conflict(String message) {
-        return new ApiException(HttpStatus.CONFLICT, message);
+    public static ApiException notFound(String code, String message) {
+        return of(HttpStatus.NOT_FOUND, code, message);
+    }
+
+    public static ApiException conflict(String code, String message) {
+        return of(HttpStatus.CONFLICT, code, message);
     }
 
     public static ApiException tooManyRequests(String message, long retryAfterSeconds) {

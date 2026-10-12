@@ -5,6 +5,7 @@ import com.university.docassistant.dto.TaskResponse;
 import com.university.docassistant.entity.TaskStatus;
 import com.university.docassistant.entity.User;
 import com.university.docassistant.exception.ApiException;
+import com.university.docassistant.exception.ErrorCodes;
 import com.university.docassistant.repository.TaskRepository;
 import com.university.docassistant.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -47,17 +48,17 @@ public class TaskService {
     public TaskResponse updateStatus(Long id, TaskStatus status, String email) {
         User user = currentUser(email);
         Long ownerId = taskRepository.findUserIdById(id)
-                .orElseThrow(() -> ApiException.notFound("Task not found"));
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.TASK_NOT_FOUND, "Task not found"));
         if (!ownerId.equals(user.getId())) {
-            throw ApiException.forbidden("You can change only your own tasks");
+            throw ApiException.forbidden(ErrorCodes.TASK_NOT_OWN, "You can change only your own tasks");
         }
         taskRepository.updateStatus(id, status);
         return taskRepository.findViewById(id)
-                .orElseThrow(() -> ApiException.notFound("Task not found"));
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.TASK_NOT_FOUND, "Task not found"));
     }
 
     private User currentUser(String email) {
         return userRepository.findByEmail(email)
-                .orElseThrow(() -> ApiException.unauthorized("User no longer exists"));
+                .orElseThrow(() -> ApiException.unauthorized(ErrorCodes.ACCOUNT_NOT_FOUND, "User no longer exists"));
     }
 }

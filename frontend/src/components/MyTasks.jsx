@@ -13,8 +13,11 @@ const FILTERS = [
   { value: 'COMPLETED', label: 'Выполнено' },
 ]
 
-/** "Мои задачи": GET /tasks/my, nearest deadline first, with a status filter, paging and status changes. */
-export default function MyTasks() {
+/**
+ * "Мои задачи": GET /tasks/my, nearest deadline first, with a status filter, paging and status changes.
+ * {@code onStatusChanged(task)} tells the page, so "Ближайшие дедлайны" can follow at once.
+ */
+export default function MyTasks({ onStatusChanged }) {
   const { notifyError } = useToast()
   const [filter, setFilter] = useState('')
   const [page, setPage] = useState(null) // Last loaded page; its content holds all tasks loaded so far.
@@ -59,6 +62,7 @@ export default function MyTasks() {
     setUpdatingId(task.id)
     try {
       const { data } = await api.put(`/tasks/${task.id}/status`, { status })
+      onStatusChanged?.(data)
       setPage((current) => ({
         ...current,
         // Under a status filter, a task moved to another status leaves the list.
@@ -82,15 +86,14 @@ export default function MyTasks() {
           Мои задачи
           {page && <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:text-slate-300">{page.totalElements}</span>}
         </h2>
-        <div className="flex flex-wrap gap-1 rounded-xl bg-slate-100 dark:bg-slate-800 p-1" role="tablist" aria-label="Фильтр по статусу">
+        <div className="flex flex-wrap gap-1 rounded-xl bg-slate-100 dark:bg-slate-800 p-1" role="group" aria-label="Фильтр по статусу">
           {FILTERS.map((item) => (
             <button
               key={item.value}
               type="button"
-              role="tab"
-              aria-selected={filter === item.value}
+              aria-pressed={filter === item.value}
               onClick={() => selectFilter(item.value)}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                 filter === item.value
                   ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
                   : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'

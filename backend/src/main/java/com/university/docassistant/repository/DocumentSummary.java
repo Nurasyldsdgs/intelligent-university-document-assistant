@@ -1,8 +1,10 @@
 package com.university.docassistant.repository;
 
+import com.university.docassistant.entity.AiStatus;
 import com.university.docassistant.entity.Course;
 import com.university.docassistant.entity.Document;
 import com.university.docassistant.entity.DocumentCategory;
+import com.university.docassistant.entity.DocumentClassification;
 import com.university.docassistant.entity.DocumentVisibility;
 import com.university.docassistant.entity.User;
 
@@ -26,17 +28,28 @@ public record DocumentSummary(
         String ownerFullName,
         Long courseId,
         String courseTitle,
-        String courseCode
+        String courseCode,
+        /** What the AI classifier chose and how sure it was; null when the category was picked by hand. */
+        String aiCategory,
+        Double aiConfidence,
+        AiStatus aiStatus
 ) {
     /** Select list matching the canonical constructor; the queries alias Document as d, owner as o, course as c. */
     static final String SELECT = """
             SELECT new com.university.docassistant.repository.DocumentSummary(
                 d.id, d.originalFileName, d.contentType, d.fileSize, d.category, d.visibility, d.uploadedAt,
-                d.textSnippet, o.id, o.email, o.fullName, c.id, c.title, c.code)
+                d.textSnippet, o.id, o.email, o.fullName, c.id, c.title, c.code, dc.categoryName, dc.confidenceScore,
+                d.aiStatus)
             FROM Document d JOIN d.owner o LEFT JOIN d.course c
+                LEFT JOIN DocumentClassification dc ON dc.document = d
             """;
 
+    /** Without the AI classification; see {@link #of(Document, DocumentClassification)}. */
     public static DocumentSummary of(Document document) {
+        return of(document, null);
+    }
+
+    public static DocumentSummary of(Document document, DocumentClassification classification) {
         User owner = document.getOwner();
         Course course = document.getCourse();
         return new DocumentSummary(
@@ -53,6 +66,9 @@ public record DocumentSummary(
                 owner.getFullName(),
                 course != null ? course.getId() : null,
                 course != null ? course.getTitle() : null,
-                course != null ? course.getCode() : null);
+                course != null ? course.getCode() : null,
+                classification != null ? classification.getCategoryName() : null,
+                classification != null ? classification.getConfidenceScore() : null,
+                document.getAiStatus());
     }
 }

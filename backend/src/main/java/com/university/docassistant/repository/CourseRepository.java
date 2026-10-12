@@ -32,6 +32,50 @@ public interface CourseRepository extends JpaRepository<Course, Long> {
     @EntityGraph(attributePaths = "teacher")
     Optional<Course> findWithTeacherById(Long id);
 
+    // Title or code contains the pattern (LikePatterns.contains: lower-case, % and _ escaped), per role's scope.
+
+    @EntityGraph(attributePaths = "teacher")
+    @Query(value = """
+            SELECT c FROM Course c
+            WHERE LOWER(c.title) LIKE :pattern ESCAPE '\\' OR LOWER(COALESCE(c.code, '')) LIKE :pattern ESCAPE '\\'
+            """,
+            countQuery = """
+            SELECT COUNT(c) FROM Course c
+            WHERE LOWER(c.title) LIKE :pattern ESCAPE '\\' OR LOWER(COALESCE(c.code, '')) LIKE :pattern ESCAPE '\\'
+            """)
+    Page<Course> searchAll(@Param("pattern") String pattern, Pageable pageable);
+
+    @EntityGraph(attributePaths = "teacher")
+    @Query(value = """
+            SELECT c FROM Course c
+            WHERE c.teacher.id = :teacherId
+              AND (LOWER(c.title) LIKE :pattern ESCAPE '\\' OR LOWER(COALESCE(c.code, '')) LIKE :pattern ESCAPE '\\')
+            """,
+            countQuery = """
+            SELECT COUNT(c) FROM Course c
+            WHERE c.teacher.id = :teacherId
+              AND (LOWER(c.title) LIKE :pattern ESCAPE '\\' OR LOWER(COALESCE(c.code, '')) LIKE :pattern ESCAPE '\\')
+            """)
+    Page<Course> searchByTeacherId(@Param("teacherId") Long teacherId, @Param("pattern") String pattern,
+                                   Pageable pageable);
+
+    @EntityGraph(attributePaths = "teacher")
+    @Query(value = """
+            SELECT c FROM Enrollment e JOIN e.course c
+            WHERE e.id.studentId = :studentId
+              AND (LOWER(c.title) LIKE :pattern ESCAPE '\\' OR LOWER(COALESCE(c.code, '')) LIKE :pattern ESCAPE '\\')
+            """,
+            countQuery = """
+            SELECT COUNT(e) FROM Enrollment e JOIN e.course c
+            WHERE e.id.studentId = :studentId
+              AND (LOWER(c.title) LIKE :pattern ESCAPE '\\' OR LOWER(COALESCE(c.code, '')) LIKE :pattern ESCAPE '\\')
+            """)
+    Page<Course> searchByStudentId(@Param("studentId") Long studentId, @Param("pattern") String pattern,
+                                   Pageable pageable);
+
+    /** The course behind an invitation link; codes are unique. */
+    Optional<Course> findByInviteCode(String inviteCode);
+
     @Query("SELECT c.id FROM Course c WHERE c.teacher.id = :teacherId")
     List<Long> findIdsByTeacherId(@Param("teacherId") Long teacherId);
 

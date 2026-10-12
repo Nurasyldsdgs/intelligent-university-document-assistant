@@ -1,5 +1,6 @@
 package com.university.docassistant.config;
 
+import com.university.docassistant.util.InviteCodes;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -36,11 +37,11 @@ public class DocumentCourseMigration implements ApplicationRunner {
                     rs -> rs.next() ? rs.getLong(1) : null, ARCHIVE_COURSE_CODE);
             if (archiveId == null) {
                 archiveId = jdbcTemplate.queryForObject("""
-                        INSERT INTO courses (title, code, description)
+                        INSERT INTO courses (title, code, description, invite_code)
                         VALUES ('Архив: документы без курса', ?,
-                                'Создан автоматически для документов, загруженных до обязательной привязки к курсу.')
+                                'Создан автоматически для документов, загруженных до обязательной привязки к курсу.', ?)
                         RETURNING id
-                        """, Long.class, ARCHIVE_COURSE_CODE);
+                        """, Long.class, ARCHIVE_COURSE_CODE, InviteCodes.generate());
             }
             jdbcTemplate.update("UPDATE documents SET course_id = ? WHERE course_id IS NULL", archiveId);
             log.info("Moved {} document(s) without a course into archive course {}", orphans, archiveId);

@@ -1,6 +1,7 @@
 package com.university.docassistant.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.university.docassistant.exception.ErrorCodes;
 import com.university.docassistant.exception.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -28,21 +29,22 @@ public class RestSecurityErrorHandler implements AuthenticationEntryPoint, Acces
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response,
                          AuthenticationException authException) throws IOException {
-        write(response, request, HttpStatus.UNAUTHORIZED, "Authentication required: missing or invalid token");
+        write(response, request, HttpStatus.UNAUTHORIZED, ErrorCodes.AUTHENTICATION_REQUIRED,
+                "Authentication required: missing or invalid token");
     }
 
     @Override
     public void handle(HttpServletRequest request, HttpServletResponse response,
                        AccessDeniedException accessDeniedException) throws IOException {
-        write(response, request, HttpStatus.FORBIDDEN, "Access denied");
+        write(response, request, HttpStatus.FORBIDDEN, ErrorCodes.ACCESS_DENIED, "Access denied");
     }
 
     private void write(HttpServletResponse response, HttpServletRequest request,
-                       HttpStatus status, String message) throws IOException {
+                       HttpStatus status, String code, String message) throws IOException {
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         objectMapper.writeValue(response.getOutputStream(), ErrorResponse.of(
-                status.value(), status.getReasonPhrase(), message, request.getRequestURI()));
+                status.value(), status.getReasonPhrase(), code, message, request.getRequestURI()));
     }
 }

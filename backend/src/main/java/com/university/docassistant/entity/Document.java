@@ -20,6 +20,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
 import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 
 import java.time.LocalDateTime;
 
@@ -31,7 +33,8 @@ import java.time.LocalDateTime;
         @Index(name = "idx_documents_course_id", columnList = "course_id"),
         @Index(name = "idx_documents_visibility", columnList = "visibility"),
         @Index(name = "idx_documents_owner_id", columnList = "owner_id"),
-        @Index(name = "idx_documents_uploaded_at", columnList = "uploaded_at")
+        @Index(name = "idx_documents_uploaded_at", columnList = "uploaded_at"),
+        @Index(name = "idx_documents_batch_import_id", columnList = "batch_import_id")
 })
 @Getter
 @Setter
@@ -68,6 +71,15 @@ public class Document {
     @Column(nullable = false, length = 30)
     @ColumnDefault("'OTHER'")
     private DocumentType type;
+
+    /**
+     * Background AI classification state. Rows from before this column count as finished (DONE): Hibernate adds
+     * the column with this default, like category and visibility above.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ai_status", nullable = false, length = 20)
+    @ColumnDefault("'DONE'")
+    private AiStatus aiStatus;
 
     /** Pre-existing rows get TEACHER_ONLY, which keeps their old access rule: the owner plus TEACHER/ADMIN. */
     @Enumerated(EnumType.STRING)
@@ -114,6 +126,13 @@ public class Document {
     /** When the last successful AI analysis finished; null if there was none. */
     @Column(name = "ai_analyzed_at")
     private LocalDateTime aiAnalyzedAt;
+
+    /** The ZIP import the document came from; null for single and multi-file uploads. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "batch_import_id")
+    @OnDelete(action = OnDeleteAction.SET_NULL)
+    @ToString.Exclude
+    private BatchImport batchImport;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "owner_id", nullable = false)

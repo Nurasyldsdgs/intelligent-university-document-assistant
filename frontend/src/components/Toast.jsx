@@ -1,14 +1,15 @@
 import { useEffect } from 'react'
 import { AlertCircle, CheckCircle2, X } from 'lucide-react'
 
-const AUTO_CLOSE_MS = 4000
+// Errors stay longer: they often explain what to do next. Both can be closed by hand at any time.
+const AUTO_CLOSE_MS = { success: 4000, error: 8000 }
 
 // Pop-up notification in the bottom-right corner; closes itself after a few seconds.
 // Pass a new `toast` object ({ id, type, message }) to show the next one.
 export default function Toast({ toast, onClose }) {
   useEffect(() => {
     if (!toast) return undefined
-    const timer = setTimeout(onClose, AUTO_CLOSE_MS)
+    const timer = setTimeout(onClose, AUTO_CLOSE_MS[toast.type] ?? AUTO_CLOSE_MS.success)
     return () => clearTimeout(timer)
   }, [toast, onClose])
 
@@ -30,7 +31,7 @@ export default function Toast({ toast, onClose }) {
         <button
           type="button"
           onClick={onClose}
-          className="rounded p-0.5 text-slate-400 dark:text-slate-500 transition hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300"
+          className="rounded p-0.5 text-slate-500 dark:text-slate-400 transition hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300"
           aria-label="Закрыть уведомление"
         >
           <X className="h-4 w-4" />

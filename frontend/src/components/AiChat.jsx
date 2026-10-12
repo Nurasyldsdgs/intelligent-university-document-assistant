@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { AlertTriangle, Bot, ChevronDown, FileText, Loader2, Quote, SendHorizontal, Sparkles, User } from 'lucide-react'
+import { Link, useLocation } from 'react-router-dom'
+import { AlertTriangle, Bot, ChevronDown, FileText, Loader2, Quote, RotateCw, SendHorizontal, Sparkles, User } from 'lucide-react'
 import api, { describeError } from '../api/axios'
 import { useToast } from '../context/ToastContext'
 import useAiStatus from '../hooks/useAiStatus'
@@ -28,30 +28,46 @@ export default function AiChat({ endpoint, title, subtitle, placeholder, suggest
   const scrollRef = useRef(null)
 
   const blockedReason = disabledReason
-    ?? (aiAvailable === false ? 'ИИ-ассистент не подключён на сервере. Обратитесь к администратору.' : null)
+    ?? (aiAvailable === false ? 'ИИ-ассистент не подключён на сервере. Обратитесь в деканат.' : null)
 
   useEffect(() => {
     const element = scrollRef.current
     if (element) element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' })
   }, [messages, loading])
 
-  const ask = async (text) => {
+  // Sends a question whose user bubble is already in the conversation; failures leave an error bubble with a retry.
+  const send = async (trimmed, id) => {
+    setLoading(true)
+    try {
+      const { data } = await api.post(endpoint, { question: trimmed }, { timeout: ASK_TIMEOUT_MS })
+      setMessages((current) => [...current, { id: id + 1, role: 'assistant', question: trimmed, ...data }])
+      // A question put back into the input after a failure is answered now; clear it unless the user edited it.
+      setQuestion((current) => (current.trim() === trimmed ? '' : current))
+    } catch (err) {
+      const { status, message } = describeError(err)
+      if (status === 503 || status === 403) notifyError(err)
+      setMessages((current) => [...current, { id: id + 1, role: 'error', text: message, status, question: trimmed }])
+      // Keep the question: put it back if the input is still empty (the user may have started typing another one).
+      setQuestion((current) => (current.trim() ? current : trimmed))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const ask = (text) => {
     const trimmed = text.trim()
     if (!trimmed || loading || blockedReason) return
     const id = Date.now()
     setMessages((current) => [...current, { id, role: 'user', text: trimmed }])
     setQuestion('')
-    setLoading(true)
-    try {
-      const { data } = await api.post(endpoint, { question: trimmed }, { timeout: ASK_TIMEOUT_MS })
-      setMessages((current) => [...current, { id: id + 1, role: 'assistant', question: trimmed, ...data }])
-    } catch (err) {
-      const { status, message } = describeError(err)
-      if (status === 503 || status === 403) notifyError(err)
-      setMessages((current) => [...current, { id: id + 1, role: 'error', text: message, status }])
-    } finally {
-      setLoading(false)
-    }
+    send(trimmed, id)
+  }
+
+  // "Повторить" on an error bubble: the same question again, in place of the error, without a second user bubble.
+  const retry = (message) => {
+    if (loading || blockedReason) return
+    setMessages((current) => current.filter((item) => item.id !== message.id))
+    send(message.question, message.id - 1)
   }
 
   const handleKeyDown = (event) => {
@@ -81,7 +97,7 @@ export default function AiChat({ endpoint, title, subtitle, placeholder, suggest
           message.role === 'user'
             ? <UserBubble key={message.id} text={message.text} />
             : message.role === 'error'
-              ? <ErrorBubble key={message.id} text={message.text} />
+              ? <ErrorBubble key={message.id} text={message.text} onRetry={loading || blockedReason ? null : () => retry(message)} />
               : <AnswerBubble key={message.id} message={message} showDocuments={showDocuments} />
         ))}
         {loading && <ThinkingBubble />}
@@ -108,7 +124,7 @@ export default function AiChat({ endpoint, title, subtitle, placeholder, suggest
             disabled={Boolean(blockedReason)}
             placeholder={blockedReason ? 'Чат недоступен' : placeholder}
             aria-label="Вопрос ИИ-ассистенту"
-            className="min-h-[2.75rem] flex-1 resize-none rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 dark:focus:ring-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-h-[2.75rem] flex-1 resize-none rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none transition placeholder:text-slate-500 dark:placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 dark:focus:ring-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-60"
           />
           <button
             type="submit"
@@ -119,7 +135,7 @@ export default function AiChat({ endpoint, title, subtitle, placeholder, suggest
             {loading ? <Loader2 className="h-4.5 w-4.5 animate-spin" /> : <SendHorizontal className="h-4.5 w-4.5" />}
           </button>
         </div>
-        <p className="mt-1.5 flex justify-between text-[11px] text-slate-400 dark:text-slate-500">
+        <p className="mt-1.5 flex justify-between text-[11px] text-slate-500 dark:text-slate-400">
           <span>Enter — отправить, Shift+Enter — новая строка</span>
           <span>{question.length}/{MAX_QUESTION_LENGTH}</span>
         </p>
@@ -205,13 +221,24 @@ function ThinkingBubble() {
   )
 }
 
-function ErrorBubble({ text }) {
+function ErrorBubble({ text, onRetry }) {
   return (
     <div className="flex gap-2">
       <AssistantAvatar />
-      <p role="alert" className="flex max-w-[85%] items-start gap-2 rounded-2xl rounded-tl-sm border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-2.5 text-sm text-amber-800 dark:text-amber-200">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {text}
-      </p>
+      <div role="alert" className="max-w-[85%] rounded-2xl rounded-tl-sm border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-2.5 text-sm text-amber-800 dark:text-amber-200">
+        <p className="flex items-start gap-2">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {text}
+        </p>
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          >
+            <RotateCw className="h-3.5 w-3.5" /> Повторить
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -239,7 +266,7 @@ function AnswerBubble({ message, showDocuments }) {
         </div>
         {sources.length > 0 && (
           <div className="mt-2 space-y-1.5">
-            <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               <Quote className="h-3 w-3" /> Источники ({sources.length})
             </p>
             {sources.map((source) => (
@@ -323,6 +350,7 @@ function focusedPreview(text, pattern) {
 
 function SourceCard({ source, open, onToggle, showDocument, termPattern }) {
   const quoteRef = useRef(null)
+  const location = useLocation()
   const preview = focusedPreview(source.text, termPattern)
 
   // Scroll the opened fragment to the first highlighted word; the relevant sentence is often mid-fragment.
@@ -353,11 +381,11 @@ function SourceCard({ source, open, onToggle, showDocument, termPattern }) {
             <span className="mb-0.5 flex items-center gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
               <FileText className="h-3 w-3 shrink-0" />
               <span className="truncate">{source.documentName}</span>
-              <span className="shrink-0 font-normal text-slate-400">· ID {source.documentId}</span>
+              <span className="shrink-0 font-normal text-slate-500 dark:text-slate-400">· ID {source.documentId}</span>
             </span>
           )}
           {!open && <span className="line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{highlight(preview, termPattern)}</span>}
-          <span className="mt-0.5 block text-[11px] text-slate-400 dark:text-slate-500">
+          <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">
             Фрагмент №{source.chunkIndex + 1} · символы {source.startOffset.toLocaleString('ru-RU')}–{source.endOffset.toLocaleString('ru-RU')}
           </span>
         </span>
@@ -371,6 +399,7 @@ function SourceCard({ source, open, onToggle, showDocument, termPattern }) {
           {showDocument && (
             <Link
               to={`/documents/${source.documentId}`}
+              state={{ from: location.pathname }}
               className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
             >
               Открыть документ <FileText className="h-3 w-3" />

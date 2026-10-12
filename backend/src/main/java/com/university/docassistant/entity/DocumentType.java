@@ -1,8 +1,9 @@
 package com.university.docassistant.entity;
 
 /**
- * Coarse document type stored next to {@link DocumentCategory}. Set at upload from the category (see
- * {@link #fromCategory}); EXAM_ANSWERS and REGULATION have no category counterpart and are only set explicitly.
+ * Document type stored next to {@link DocumentCategory}, with the six Sprint 2 values. Set at upload from the
+ * category (see {@link #fromCategory}): each spec category maps to the type of the same name, and the legacy
+ * categories TRANSCRIPT and THESIS map to OTHER.
  */
 public enum DocumentType {
     SYLLABUS,
@@ -20,6 +21,8 @@ public enum DocumentType {
             case SYLLABUS -> SYLLABUS;
             case ASSIGNMENT -> ASSIGNMENT;
             case LECTURE -> LECTURE;
+            case EXAM_ANSWERS -> EXAM_ANSWERS;
+            case REGULATION -> REGULATION;
             case TRANSCRIPT, THESIS, OTHER -> OTHER;
         };
     }

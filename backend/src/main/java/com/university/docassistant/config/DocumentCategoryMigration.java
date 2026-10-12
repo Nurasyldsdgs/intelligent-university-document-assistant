@@ -14,10 +14,17 @@ import java.util.stream.Collectors;
 
 /**
  * Keeps the documents.category check constraint in step with {@link DocumentCategory}. ddl-auto=update never
- * alters an existing constraint, so without this a category added later (OTHER) would be rejected by the database.
- * Documents of retired types (REGULATIONS, EXAM_ANSWERS, GRANT_PROPOSAL) become OTHER first, otherwise they could
- * neither satisfy the new constraint nor be loaded into the enum.
- * Idempotent: the constraint is rebuilt from the enum at every start.
+ * alters an existing constraint, so without this a category added later (EXAM_ANSWERS, REGULATION) would be
+ * rejected by the database. At every start, in order:
+ * <ol>
+ *   <li>rows of the old plural name REGULATIONS become REGULATION;</li>
+ *   <li>rows of categories no longer in the enum (e.g. GRANT_PROPOSAL) become OTHER, otherwise they could neither
+ *       satisfy the new constraint nor be loaded into the enum;</li>
+ *   <li>the constraint is rebuilt from the enum;</li>
+ *   <li>documents.type is backfilled from the category where a type of the same name exists;</li>
+ *   <li>EXAM_ANSWERS documents are forced to TEACHER_ONLY, the same rule DocumentService applies on upload.</li>
+ * </ol>
+ * Idempotent: once applied, the updates find nothing.
  */
 @Slf4j
 @Component
@@ -33,6 +40,10 @@ public class DocumentCategoryMigration implements ApplicationRunner {
                 .map(category -> "'" + category.name() + "'")
                 .collect(Collectors.joining(", "));
         jdbcTemplate.execute("ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_category_check");
+        int renamed = jdbcTemplate.update("UPDATE documents SET category = 'REGULATION' WHERE category = 'REGULATIONS'");
+        if (renamed > 0) {
+            log.info("Renamed category REGULATIONS to REGULATION for {} document(s)", renamed);
+        }
         int retired = jdbcTemplate.update("UPDATE documents SET category = 'OTHER' WHERE category NOT IN ("
                 + values + ")");
         if (retired > 0) {
@@ -43,10 +54,18 @@ public class DocumentCategoryMigration implements ApplicationRunner {
         // documents.type came later with default OTHER; rows whose category has a matching type get it.
         int typed = jdbcTemplate.update("""
                 UPDATE documents SET type = category
-                WHERE type = 'OTHER' AND category IN ('SYLLABUS', 'ASSIGNMENT', 'LECTURE')
+                WHERE type = 'OTHER' AND category IN ('SYLLABUS', 'ASSIGNMENT', 'LECTURE', 'EXAM_ANSWERS', 'REGULATION')
                 """);
         if (typed > 0) {
             log.info("Set documents.type from category for {} document(s)", typed);
+        }
+        // Exam answers must never reach students, whatever visibility they were uploaded with.
+        int hidden = jdbcTemplate.update("""
+                UPDATE documents SET visibility = 'TEACHER_ONLY'
+                WHERE category = 'EXAM_ANSWERS' AND visibility <> 'TEACHER_ONLY'
+                """);
+        if (hidden > 0) {
+            log.warn("Forced {} EXAM_ANSWERS document(s) to TEACHER_ONLY", hidden);
         }
     }
 }

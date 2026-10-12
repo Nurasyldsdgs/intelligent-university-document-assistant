@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, ListChecks, Loader2, RefreshCw, Sparkles, Tags } from 'lucide-react'
+import { AlertTriangle, ListChecks, Loader2, Lock, RefreshCw, Sparkles, Tags } from 'lucide-react'
 import api from '../api/axios'
 import { useToast } from '../context/ToastContext'
-import { dateFormatter } from '../utils/fileTypes'
+import { formatDateTime } from '../utils/dates'
 import TaskItem from './TaskItem'
 
 const POLL_INTERVAL_MS = 3000
@@ -27,6 +27,8 @@ export default function AnalysisPanel({ doc }) {
     api.get(`/documents/${doc.id}/assignments`, { params: { size: TASKS_PAGE_SIZE } }),
   ]).then(([analysisResponse, tasksResponse]) => [analysisResponse.data, tasksResponse.data]), [doc.id])
 
+  // Reloaded also when the document's category, AI status or number of found assignments changes (a reclassify on
+  // this page): its assignments may have appeared or changed.
   useEffect(() => {
     let cancelled = false
     fetchAll()
@@ -38,9 +40,11 @@ export default function AnalysisPanel({ doc }) {
       .catch((err) => !cancelled && setLoadError(notifyError(err)))
     return () => {
       cancelled = true
-      clearTimeout(pollRef.current)
     }
-  }, [fetchAll, notifyError])
+  }, [fetchAll, notifyError, doc.category, doc.aiStatus, doc.assignmentsCount])
+
+  // A running analysis poll is stopped only when the panel goes away, not by the reloads above.
+  useEffect(() => () => clearTimeout(pollRef.current), [])
 
   const load = async () => {
     const [analysisData, tasksData] = await fetchAll()
@@ -93,7 +97,9 @@ export default function AnalysisPanel({ doc }) {
   }
 
   const analyzed = Boolean(analysis.analyzedAt)
-  const canRun = analysis.canAnalyze && analysis.aiAvailable && analysis.hasText
+  // The backend refuses it (400) and already reports canAnalyze=false; say why instead of just hiding the button.
+  const examAnswers = doc.category === 'EXAM_ANSWERS'
+  const canRun = analysis.canAnalyze && analysis.aiAvailable && analysis.hasText && !examAnswers
 
   return (
     <div className="space-y-5">
@@ -104,10 +110,10 @@ export default function AnalysisPanel({ doc }) {
               <Sparkles className="h-4 w-4 text-violet-600 dark:text-violet-400" /> Краткий анализ ИИ
             </h3>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              {analyzed ? `Обновлён ${dateFormatter.format(new Date(analysis.analyzedAt))}` : statusHint(analysis)}
+              {analyzed ? `Обновлён ${formatDateTime(analysis.analyzedAt)}` : statusHint(analysis, examAnswers)}
             </p>
           </div>
-          {analysis.canAnalyze && (
+          {analysis.canAnalyze && !examAnswers && (
             <button
               type="button"
               onClick={startAnalysis}
@@ -120,6 +126,13 @@ export default function AnalysisPanel({ doc }) {
             </button>
           )}
         </div>
+
+        {examAnswers && (
+          <p className="mt-3 flex items-start gap-2 rounded-lg bg-white/70 dark:bg-slate-900/50 px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
+            <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-rose-400" />
+            <span>{EXAM_ANSWERS_NOT_ANALYZED} — иначе их названия и сроки попали бы студентам в задачи. Документ виден только преподавателю курса.</span>
+          </p>
+        )}
 
         {running && (
           <p className="mt-3 rounded-lg bg-white/70 dark:bg-slate-900/50 px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
@@ -169,7 +182,7 @@ export default function AnalysisPanel({ doc }) {
           </ul>
         )}
         {tasks.content.length > 0 && (
-          <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
             Каждый студент курса получает эти задания в «Мои задачи» и отмечает их выполнение сам.
           </p>
         )}
@@ -178,8 +191,12 @@ export default function AnalysisPanel({ doc }) {
   )
 }
 
+// Same text as the backend's 400 for POST /analyze (DocumentService.EXAM_ANSWERS_NOT_ANALYZED).
+const EXAM_ANSWERS_NOT_ANALYZED = 'Ответы к экзамену не анализируются на задания'
+
 // Why there is no analysis yet, in the user's terms.
-function statusHint(analysis) {
+function statusHint(analysis, examAnswers) {
+  if (examAnswers) return 'Анализ отключён для ответов к экзамену.'
   if (!analysis.hasText) return 'В документе нет распознанного текста — анализ недоступен.'
   if (!analysis.aiAvailable) return 'ИИ-ассистент не подключён на сервере.'
   if (analysis.autoAnalyzed) return 'Силлабусы и задания анализируются автоматически после загрузки — результат скоро появится.'

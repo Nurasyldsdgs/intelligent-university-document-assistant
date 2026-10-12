@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CalendarClock, HardDrive, Loader2, User } from 'lucide-react'
 import api, { getBlobErrorMessage } from '../api/axios'
-import { dateFormatter, formatSize, getFileFormat, isImage, isPreviewable } from '../utils/fileTypes'
+import { formatSize, getFileFormat, isImage, isPreviewable } from '../utils/fileTypes'
+import { formatDateTime } from '../utils/dates'
 
 /** Inline preview for PDF and images (GET /documents/{id}/view); other types get a metadata card. */
 export default function DocumentPreview({ doc }) {
@@ -9,6 +10,20 @@ export default function DocumentPreview({ doc }) {
   const previewable = isPreviewable(doc)
   // Only fetched for previewable types; otherwise the metadata card is shown straight away.
   const [preview, setPreview] = useState({ loading: previewable, url: null, error: '' })
+
+  // Focus inside the embedded viewer matches no CSS :focus in this page; the window's blur tells us it went there.
+  const frameRef = useRef(null)
+  const [frameFocused, setFrameFocused] = useState(false)
+  useEffect(() => {
+    const onBlur = () => setTimeout(() => setFrameFocused(Boolean(frameRef.current) && document.activeElement === frameRef.current))
+    const onFocus = () => setFrameFocused(false)
+    window.addEventListener('blur', onBlur)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
 
   useEffect(() => {
     if (!previewable) return undefined
@@ -43,7 +58,9 @@ export default function DocumentPreview({ doc }) {
           <img src={preview.url} alt={doc.originalFileName} className="max-h-[66vh] max-w-full rounded-lg object-contain shadow-sm" />
         </div>
       ) : preview.url ? (
-        <iframe src={preview.url} title={doc.originalFileName} className="h-[70vh] w-full bg-white dark:bg-slate-900" />
+        <div className={frameFocused ? 'outline-2 -outline-offset-2 outline-indigo-500' : ''}>
+          <iframe ref={frameRef} src={preview.url} title={doc.originalFileName} className="block h-[70vh] w-full bg-white dark:bg-slate-900 focus:outline-none" />
+        </div>
       ) : (
         <MetadataCard doc={doc} format={format} error={preview.error} />
       )}
@@ -68,7 +85,7 @@ function MetadataCard({ doc, format, error }) {
       </div>
       <dl className="mx-auto mt-6 grid max-w-2xl gap-3 sm:grid-cols-3">
         <MetaItem icon={HardDrive} label="Размер" value={formatSize(doc.fileSize)} />
-        <MetaItem icon={CalendarClock} label="Дата загрузки" value={dateFormatter.format(new Date(doc.uploadedAt))} />
+        <MetaItem icon={CalendarClock} label="Дата загрузки" value={formatDateTime(doc.uploadedAt)} />
         <MetaItem icon={User} label="Владелец" value={doc.ownerFullName || doc.ownerEmail} title={doc.ownerEmail} />
       </dl>
     </div>
@@ -78,7 +95,7 @@ function MetadataCard({ doc, format, error }) {
 function MetaItem({ icon: Icon, label, value, title }) {
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3">
-      <dt className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+      <dt className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
         <Icon className="h-3.5 w-3.5" />
         {label}
       </dt>

@@ -70,31 +70,32 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleUnreadable(HttpMessageNotReadableException ex,
                                                           HttpServletRequest request) {
-        return build(HttpStatus.BAD_REQUEST, "Malformed request body or invalid field value", request);
+        return build(HttpStatus.BAD_REQUEST, ErrorCodes.MALFORMED_REQUEST, "Malformed request body or invalid field value", request);
     }
 
     @ExceptionHandler({MissingServletRequestParameterException.class, MissingServletRequestPartException.class})
     public ResponseEntity<ErrorResponse> handleMissingParameter(Exception ex, HttpServletRequest request) {
-        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request);
+        return build(HttpStatus.BAD_REQUEST, ErrorCodes.MISSING_PARAMETER, ex.getMessage(), request);
     }
 
     // E.g. an unknown enum value in ?category= or a non-numeric id.
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex,
                                                             HttpServletRequest request) {
-        return build(HttpStatus.BAD_REQUEST, "Invalid value for parameter '" + ex.getName() + "'", request);
+        return build(HttpStatus.BAD_REQUEST, ErrorCodes.INVALID_PARAMETER, "Invalid value for parameter '" + ex.getName() + "'",
+                request);
     }
 
     // No controller and no static resource for the path; without this the catch-all below would answer 500.
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException ex, HttpServletRequest request) {
-        return build(HttpStatus.NOT_FOUND, "Endpoint not found", request);
+        return build(HttpStatus.NOT_FOUND, ErrorCodes.ENDPOINT_NOT_FOUND, "Endpoint not found", request);
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ErrorResponse> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex,
                                                                   HttpServletRequest request) {
-        return build(HttpStatus.METHOD_NOT_ALLOWED, ex.getMessage(), request);
+        return build(HttpStatus.METHOD_NOT_ALLOWED, ErrorCodes.METHOD_NOT_ALLOWED, ex.getMessage(), request);
     }
 
     @ExceptionHandler(BadCredentialsException.class)
@@ -109,48 +110,50 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({DisabledException.class, LockedException.class})
     public ResponseEntity<ErrorResponse> handleAccountState(AuthenticationException ex,
                                                             HttpServletRequest request) {
-        return build(HttpStatus.FORBIDDEN, ex.getMessage(), request);
+        return build(HttpStatus.FORBIDDEN, ErrorCodes.ACCOUNT_DISABLED, ex.getMessage(), request);
     }
 
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ErrorResponse> handleAuthentication(AuthenticationException ex,
                                                               HttpServletRequest request) {
-        return build(HttpStatus.UNAUTHORIZED, "Authentication failed", request);
+        return build(HttpStatus.UNAUTHORIZED, ErrorCodes.AUTHENTICATION_FAILED, "Authentication failed", request);
     }
 
     // Thrown by @PreAuthorize inside controllers; without this the catch-all below would turn it into 500.
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request) {
-        return build(HttpStatus.FORBIDDEN, "Access denied", request);
+        return build(HttpStatus.FORBIDDEN, ErrorCodes.ACCESS_DENIED, "Access denied", request);
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ErrorResponse> handleMaxUploadSize(MaxUploadSizeExceededException ex,
                                                              HttpServletRequest request) {
-        return build(HttpStatus.PAYLOAD_TOO_LARGE, "File is too large", request);
+        return build(HttpStatus.PAYLOAD_TOO_LARGE, ErrorCodes.UPLOAD_TOO_LARGE, "File is too large", request);
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorResponse> handleDataIntegrity(DataIntegrityViolationException ex,
                                                              HttpServletRequest request) {
         log.warn("Data integrity violation on {}: {}", request.getRequestURI(), ex.getMostSpecificCause().getMessage());
-        return build(HttpStatus.CONFLICT, "Request conflicts with existing data", request);
+        return build(HttpStatus.CONFLICT, ErrorCodes.DATA_CONFLICT, "Request conflicts with existing data", request);
     }
 
     @ExceptionHandler(EmailSendException.class)
     public ResponseEntity<ErrorResponse> handleEmail(EmailSendException ex, HttpServletRequest request) {
         log.error("Email delivery failed: {}", ex.getMessage(), ex.getCause());
-        return build(HttpStatus.SERVICE_UNAVAILABLE, "Could not send email. Please try again later.", request);
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.EMAIL_SEND_FAILED, "Could not send email. Please try again later.",
+                request);
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex, HttpServletRequest request) {
         log.error("Unexpected error on {}", request.getRequestURI(), ex);
-        return build(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error", request);
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, ErrorCodes.INTERNAL_ERROR, "Internal server error", request);
     }
 
-    private ResponseEntity<ErrorResponse> build(HttpStatus status, String message, HttpServletRequest request) {
+    private ResponseEntity<ErrorResponse> build(HttpStatus status, String code, String message,
+                                                HttpServletRequest request) {
         return ResponseEntity.status(status).body(ErrorResponse.of(
-                status.value(), status.getReasonPhrase(), message, request.getRequestURI()));
+                status.value(), status.getReasonPhrase(), code, message, request.getRequestURI()));
     }
 }

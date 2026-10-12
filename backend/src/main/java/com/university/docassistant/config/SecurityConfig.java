@@ -52,7 +52,7 @@ public class SecurityConfig {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/auth/**", "/api/v1/test/public", "/oauth2/**", "/login/oauth2/**", "/error")
+                        .requestMatchers("/api/v1/auth/**", "/oauth2/**", "/login/oauth2/**", "/error")
                         .permitAll()
                         .anyRequest().authenticated())
                 .oauth2Login(oauth2 -> oauth2

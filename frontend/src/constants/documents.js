@@ -6,17 +6,26 @@ export const VISIBILITY_LABELS = {
   TEACHER_ONLY: 'Только преподаватель курса',
 }
 
-// Same names as the backend DocumentCategory enum.
+// Same names as the backend DocumentCategory enum. TRANSCRIPT and THESIS are legacy: kept so older documents still
+// show a label, but no longer offered on upload.
 export const CATEGORY_LABELS = {
   SYLLABUS: 'Силлабус',
   ASSIGNMENT: 'Задание',
   LECTURE: 'Лекция',
+  EXAM_ANSWERS: 'Ответы к экзамену',
+  REGULATION: 'Положение / регламент',
   TRANSCRIPT: 'Транскрипт',
   THESIS: 'Диссертация / ВКР',
   OTHER: 'Другое',
 }
 
-export const CATEGORY_OPTIONS = Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label }))
+// The six Sprint 2 categories (DocumentClassificationService.TYPES): what the upload select offers.
+const SPEC_CATEGORIES = ['SYLLABUS', 'ASSIGNMENT', 'LECTURE', 'EXAM_ANSWERS', 'REGULATION', 'OTHER']
+
+export const CATEGORY_OPTIONS = SPEC_CATEGORIES.map((value) => ({ value, label: CATEGORY_LABELS[value] }))
+
+// The backend always stores this category as TEACHER_ONLY and never analyzes it into assignments.
+export const TEACHER_ONLY_CATEGORY = 'EXAM_ANSWERS'
 
 // Formats the backend accepts in multi-file and ZIP uploads (DocumentService.ALLOWED_TYPES).
 export const DOCUMENT_EXTENSIONS = ['pdf', 'docx', 'doc', 'pptx', 'txt', 'png', 'jpg', 'jpeg']

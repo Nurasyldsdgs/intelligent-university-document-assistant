@@ -2,6 +2,7 @@ package com.university.docassistant.repository;
 
 import com.university.docassistant.dto.AssignmentDtos.AssignmentResponse;
 import com.university.docassistant.entity.Assignment;
+import java.util.Collection;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -33,6 +34,17 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
 
     @Query("SELECT a FROM Assignment a WHERE a.sourceDocument.id = :documentId")
     List<Assignment> findBySourceDocumentId(@Param("documentId") Long documentId);
+
+    /** [documentId, count] of assignments found in each of the documents, in one query. */
+    @Query("""
+            SELECT a.sourceDocument.id, COUNT(a) FROM Assignment a
+            WHERE a.sourceDocument.id IN :documentIds
+            GROUP BY a.sourceDocument.id
+            """)
+    List<Object[]> countBySourceDocumentIds(@Param("documentIds") Collection<Long> documentIds);
+
+    @Query("SELECT COUNT(a) FROM Assignment a WHERE a.sourceDocument.id = :documentId")
+    long countBySourceDocumentId(@Param("documentId") Long documentId);
 
     @Query("SELECT a.course.id FROM Assignment a WHERE a.id = :id")
     Optional<Long> findCourseIdById(@Param("id") Long id);

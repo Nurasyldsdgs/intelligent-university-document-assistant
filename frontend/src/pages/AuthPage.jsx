@@ -1,13 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Check, FileText, Lock, Mail, ShieldCheck, Sparkles, User, Users } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import { GOOGLE_AUTH_URL, getErrorMessage } from '../api/axios'
-import { ROLES, ROLE_STUDENT } from '../constants/roles'
+import { GOOGLE_AUTH_URL, getErrorMessage, messageForCode } from '../api/axios'
+import { ROLE_STUDENT, ROLE_TEACHER } from '../constants/roles'
 import { Alert, SubmitButton, TextField } from '../components/FormControls'
 import ForgotPasswordModal from '../components/ForgotPasswordModal'
 import ThemeToggle from '../components/ThemeToggle'
 import EmailVerificationStep from '../components/EmailVerificationStep'
+import { pathFromLocationState, rememberPostLoginRedirect } from '../utils/postLoginRedirect'
 
 const OAUTH_ERRORS = {
   oauth2_failed: 'Не удалось войти через Google. Попробуйте ещё раз.',
@@ -17,7 +18,8 @@ const OAUTH_ERRORS = {
 
 const RESEND_COOLDOWN_SECONDS = 60
 
-const EMPTY_FORM = { email: '', password: '', fullName: '', role: ROLE_STUDENT }
+// Everyone registers as a student; teacherRequested asks the dean's office (ADMIN) for the teacher role.
+const EMPTY_FORM = { email: '', password: '', fullName: '', teacherRequested: false }
 
 const MIN_PASSWORD_LENGTH = 8 // RegisterRequest: @Size(min = 8)
 const MISSING_REQUIRED = 'Заполните все обязательные поля.'
@@ -45,13 +47,14 @@ function describeAuthError(err) {
   const data = err.response?.data
   switch (data?.code) {
     case 'EMAIL_TAKEN':
-      return { message: data.message, fields: { email: true } }
+      return { message: messageForCode(data), fields: { email: true } }
     case 'INVALID_CREDENTIALS':
-      return { message: data.message, fields: { email: true, password: true } }
+      return { message: messageForCode(data), fields: { email: true, password: true } }
     case 'VALIDATION_FAILED':
+      // The server's summary; each field also gets its own message below it.
       return { message: data.message, fields: data.fieldErrors ?? {} }
     default:
-      return { message: data?.message ?? getErrorMessage(err), fields: {} }
+      return { message: getErrorMessage(err), fields: {} }
   }
 }
 
@@ -66,6 +69,9 @@ export default function AuthPage() {
   const [error, setError] = useState(() => OAUTH_ERRORS[location.state?.oauthError] ?? '')
   const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
+  // After a 429 from login: { email, until (ms), message }. The server blocks this email from this browser's IP,
+  // so the button stays disabled for that email until the block ends.
+  const [loginLock, setLoginLock] = useState(null)
   const [showReset, setShowReset] = useState(false)
   // Set once an unverified account needs its email confirmed: { email, info, cooldown }.
   const [verification, setVerification] = useState(null)
@@ -85,6 +91,14 @@ export default function AuthPage() {
     setFieldErrors((prev) => ({ ...prev, [field]: undefined }))
     setError('')
   }
+
+  useEffect(() => {
+    if (!loginLock) return undefined
+    const timer = setTimeout(() => setLoginLock(null), Math.max(0, loginLock.until - Date.now()))
+    return () => clearTimeout(timer)
+  }, [loginLock])
+
+  const loginLocked = !isRegister && loginLock !== null && form.email.trim().toLowerCase() === loginLock.email
 
   const handleSubmit = async (event) => {
     event.preventDefault()
@@ -107,12 +121,12 @@ export default function AuthPage() {
           email,
           password: form.password,
           fullName: form.fullName.trim(),
-          role: form.role,
+          role: form.teacherRequested ? ROLE_TEACHER : ROLE_STUDENT,
         })
         setVerification({ email, info: message, cooldown: RESEND_COOLDOWN_SECONDS })
       } else {
         await login(email, form.password)
-        navigate('/dashboard', { replace: true })
+        navigate(pathFromLocationState(location.state) ?? '/dashboard', { replace: true })
       }
     } catch (err) {
       if (err.response?.data?.code === 'EMAIL_NOT_VERIFIED') {
@@ -126,6 +140,10 @@ export default function AuthPage() {
         const { message, fields } = describeAuthError(err)
         setError(message)
         setFieldErrors(fields)
+        if (!isRegister && err.response?.status === 429) {
+          const seconds = Number(err.response.data?.retryAfterSeconds) || 15 * 60
+          setLoginLock({ email: email.toLowerCase(), until: Date.now() + seconds * 1000, message })
+        }
       }
     } finally {
       setLoading(false)
@@ -288,35 +306,22 @@ export default function AuthPage() {
               </div>
 
               {isRegister && (
-                <fieldset>
-                  <legend className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-200">Роль</legend>
-                  <div className="grid grid-cols-3 gap-2">
-                    {ROLES.map(({ value, label, icon: Icon }) => {
-                      const selected = form.role === value
-                      return (
-                        <label
-                          key={value}
-                          className={`flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border px-2 py-3 text-center text-xs font-medium transition ${
-                            selected
-                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 ring-2 ring-indigo-100 dark:ring-indigo-500/30'
-                              : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:border-slate-400'
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="role"
-                            value={value}
-                            checked={selected}
-                            onChange={updateField('role')}
-                            className="sr-only"
-                          />
-                          <Icon className="h-5 w-5" />
-                          {label}
-                        </label>
-                      )
-                    })}
-                  </div>
-                </fieldset>
+                <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-200 transition hover:border-slate-400">
+                  <input
+                    type="checkbox"
+                    checked={form.teacherRequested}
+                    onChange={(event) => setForm((current) => ({ ...current, teacherRequested: event.target.checked }))}
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span>
+                    Я преподаватель (роль подтверждает деканат)
+                    {form.teacherRequested && (
+                      <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                        До подтверждения вы входите как студент; деканат увидит заявку в своей панели.
+                      </span>
+                    )}
+                  </span>
+                </label>
               )}
 
               {error && (
@@ -326,10 +331,16 @@ export default function AuthPage() {
                 </div>
               )}
 
-              <SubmitButton loading={loading}>{isRegister ? 'Зарегистрироваться' : 'Войти'}</SubmitButton>
+              {loginLocked && !error && (
+                // The alert above is cleared by typing; the reason for the disabled button must stay visible.
+                <p className="text-center text-xs text-amber-700 dark:text-amber-300" role="status">{loginLock.message}</p>
+              )}
+              <SubmitButton loading={loading} disabled={loading || loginLocked}>
+                {isRegister ? 'Зарегистрироваться' : loginLocked ? 'Вход временно заблокирован' : 'Войти'}
+              </SubmitButton>
             </form>
 
-            <div className="my-6 flex items-center gap-3 text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500">
+            <div className="my-6 flex items-center gap-3 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
               <span className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
               или
               <span className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
@@ -337,6 +348,7 @@ export default function AuthPage() {
 
             <a
               href={GOOGLE_AUTH_URL}
+              onClick={() => rememberPostLoginRedirect(pathFromLocationState(location.state))}
               className="flex w-full items-center justify-center gap-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200 shadow-sm transition hover:bg-slate-50 dark:hover:bg-slate-800/50 focus:outline-none focus:ring-4 focus:ring-slate-100"
             >
               <GoogleIcon />
@@ -377,7 +389,7 @@ function RegisterSteps({ current }) {
             </span>
             <span
               className={`text-xs font-medium transition-colors duration-300 ${
-                active ? 'text-slate-900 dark:text-white' : 'text-slate-400 dark:text-slate-500'
+                active ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400'
               }`}
             >
               {title}

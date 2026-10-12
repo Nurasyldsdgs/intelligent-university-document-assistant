@@ -1,6 +1,7 @@
 package com.university.docassistant.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.university.docassistant.entity.AiStatus;
 import com.university.docassistant.entity.DocumentCategory;
 import com.university.docassistant.entity.DocumentVisibility;
 
@@ -29,6 +30,11 @@ public record DocumentResponse(
         boolean hasExtractedText,
         String textSnippet,
         // Explicit name: Jackson would otherwise serialize a boolean "isX" accessor as "x".
-        @JsonProperty("isOwner") boolean isOwner
+        @JsonProperty("isOwner") boolean isOwner,
+        /** Category chosen by the AI classifier (null if picked by hand) and its confidence 0..1 (null if not given). */
+        String aiCategory,
+        Double aiConfidence,
+        /** PENDING/PROCESSING while the AI classifies it in the background; see GET /documents/{id}/status. */
+        AiStatus aiStatus
 ) {
 }

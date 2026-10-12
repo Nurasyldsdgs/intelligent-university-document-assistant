@@ -1,7 +1,10 @@
 package com.university.docassistant.repository;
 
+import com.university.docassistant.entity.AiStatus;
 import com.university.docassistant.entity.Document;
 import com.university.docassistant.entity.DocumentCategory;
+import com.university.docassistant.entity.DocumentType;
+import com.university.docassistant.entity.DocumentVisibility;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -25,27 +28,32 @@ import java.util.Optional;
 @Repository
 public interface DocumentRepository extends JpaRepository<Document, Long> {
 
-    /** For ADMIN: every document, those without a course included; {@code courseId} null means all of them. */
+    /** For ADMIN: every document; {@code courseId} null means all of them. */
     @Query(value = DocumentSummary.SELECT + "WHERE (:courseId IS NULL OR c.id = :courseId)",
             countQuery = "SELECT COUNT(d) FROM Document d WHERE (:courseId IS NULL OR d.course.id = :courseId)")
     Page<DocumentSummary> findAllSummaries(@Param("courseId") Long courseId, Pageable pageable);
 
     /**
-     * Documents of the allowed courses (AccessControlService.Scope); TEACHER_ONLY ones only with
-     * {@code includeTeacherOnly}. {@code courseId} null means all allowed courses.
+     * Documents of the allowed courses (AccessControlService.Scope); TEACHER_ONLY ones, and ones the AI is still
+     * classifying (PENDING/PROCESSING), only with {@code includeTeacherOnly}. {@code courseId} null means all allowed
+     * courses.
      */
     @Query(value = DocumentSummary.SELECT + """
             WHERE c.id IN :courseIds
               AND (:courseId IS NULL OR c.id = :courseId)
               AND (:includeTeacherOnly = TRUE
-                   OR d.visibility <> com.university.docassistant.entity.DocumentVisibility.TEACHER_ONLY)
+                   OR (d.visibility <> com.university.docassistant.entity.DocumentVisibility.TEACHER_ONLY
+                       AND d.aiStatus NOT IN (com.university.docassistant.entity.AiStatus.PENDING,
+                                              com.university.docassistant.entity.AiStatus.PROCESSING)))
             """,
             countQuery = """
             SELECT COUNT(d) FROM Document d
             WHERE d.course.id IN :courseIds
               AND (:courseId IS NULL OR d.course.id = :courseId)
               AND (:includeTeacherOnly = TRUE
-                   OR d.visibility <> com.university.docassistant.entity.DocumentVisibility.TEACHER_ONLY)
+                   OR (d.visibility <> com.university.docassistant.entity.DocumentVisibility.TEACHER_ONLY
+                       AND d.aiStatus NOT IN (com.university.docassistant.entity.AiStatus.PENDING,
+                                              com.university.docassistant.entity.AiStatus.PROCESSING)))
             """)
     Page<DocumentSummary> findSummariesInCourses(@Param("courseIds") Collection<Long> courseIds,
                                                  @Param("includeTeacherOnly") boolean includeTeacherOnly,
@@ -66,7 +74,9 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
             WHERE d.text_tsv @@ websearch_to_tsquery('russian', :query)
               AND (:all
                    OR (d.course_id IN (:courseIds)
-                       AND (:includeTeacherOnly OR d.visibility <> 'TEACHER_ONLY')))
+                       AND (:includeTeacherOnly
+                            OR (d.visibility <> 'TEACHER_ONLY'
+                                AND d.ai_status NOT IN ('PENDING', 'PROCESSING')))))
             ORDER BY ts_rank(d.text_tsv, websearch_to_tsquery('russian', :query)) DESC, d.uploaded_at DESC, d.id DESC
             """,
             countQuery = """
@@ -74,7 +84,9 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
             WHERE d.text_tsv @@ websearch_to_tsquery('russian', :query)
               AND (:all
                    OR (d.course_id IN (:courseIds)
-                       AND (:includeTeacherOnly OR d.visibility <> 'TEACHER_ONLY')))
+                       AND (:includeTeacherOnly
+                            OR (d.visibility <> 'TEACHER_ONLY'
+                                AND d.ai_status NOT IN ('PENDING', 'PROCESSING')))))
             """,
             nativeQuery = true)
     Page<Long> searchVisibleIds(@Param("query") String query,
@@ -106,6 +118,61 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
                        @Param("summary") String summary,
                        @Param("topics") String topics,
                        @Param("analyzedAt") LocalDateTime analyzedAt);
+
+    /** What a status poll needs from a document, with what deciding access to it needs. */
+    record StatusRow(Long id, Long courseId, DocumentVisibility visibility, AiStatus aiStatus,
+                     DocumentCategory category, Double confidence) {
+    }
+
+    @Query("""
+            SELECT new com.university.docassistant.repository.DocumentRepository$StatusRow(
+                d.id, d.course.id, d.visibility, d.aiStatus, d.category, dc.confidenceScore)
+            FROM Document d LEFT JOIN DocumentClassification dc ON dc.document = d
+            WHERE d.id IN :ids
+            """)
+    List<StatusRow> findStatusRows(@Param("ids") Collection<Long> ids);
+
+    /** What background classification needs from a document, without loading the entity and its associations. */
+    record ClassificationSource(Long id, String originalFileName, String extractedText, String ownerEmail) {
+    }
+
+    @Query("""
+            SELECT new com.university.docassistant.repository.DocumentRepository$ClassificationSource(
+                d.id, d.originalFileName, d.extractedText, o.email)
+            FROM Document d JOIN d.owner o WHERE d.id = :id
+            """)
+    Optional<ClassificationSource> findClassificationSource(@Param("id") Long id);
+
+    /** Moves a document from {@code from} to {@code to}; 0 when its status was something else (or it is gone). */
+    @Modifying
+    @Query("UPDATE Document d SET d.aiStatus = :to WHERE d.id = :id AND d.aiStatus = :from")
+    int changeAiStatus(@Param("id") Long id, @Param("from") AiStatus from, @Param("to") AiStatus to);
+
+    @Modifying
+    @Query("UPDATE Document d SET d.aiStatus = :status WHERE d.id = :id")
+    int setAiStatus(@Param("id") Long id, @Param("status") AiStatus status);
+
+    @Query("SELECT d.aiStatus FROM Document d WHERE d.id = :id")
+    Optional<AiStatus> findAiStatusById(@Param("id") Long id);
+
+    /** The classification outcome in one statement; 0 when the document is gone. */
+    @Modifying
+    @Query("""
+            UPDATE Document d SET d.category = :category, d.type = :type, d.aiStatus = :status
+            WHERE d.id = :id
+            """)
+    int updateClassification(@Param("id") Long id,
+                             @Param("category") DocumentCategory category,
+                             @Param("type") DocumentType type,
+                             @Param("status") AiStatus status);
+
+    /** Rule A for documents the AI found to be EXAM_ANSWERS; 0 when it already was TEACHER_ONLY. */
+    @Modifying
+    @Query("""
+            UPDATE Document d SET d.visibility = com.university.docassistant.entity.DocumentVisibility.TEACHER_ONLY
+            WHERE d.id = :id AND d.visibility <> com.university.docassistant.entity.DocumentVisibility.TEACHER_ONLY
+            """)
+    int forceTeacherOnly(@Param("id") Long id);
 
     /** Row lock that serializes concurrent analyses of one document, so their task sets never mix. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)

@@ -130,7 +130,7 @@ export default function EmailVerificationStep({ email, initialInfo = '', initial
           </button>
         </div>
 
-        <p className="text-xs text-slate-400 dark:text-slate-500">Не пришло письмо? Проверьте папку «Спам».</p>
+        <p className="text-xs text-slate-500 dark:text-slate-400">Не пришло письмо? Проверьте папку «Спам».</p>
       </form>
     </div>
   )

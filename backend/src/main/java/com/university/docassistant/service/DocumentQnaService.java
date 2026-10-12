@@ -6,6 +6,7 @@ import com.university.docassistant.dto.SourceSnippetDto;
 import com.university.docassistant.entity.Document;
 import com.university.docassistant.entity.User;
 import com.university.docassistant.exception.ApiException;
+import com.university.docassistant.exception.ErrorCodes;
 import com.university.docassistant.repository.DocumentChunkRepository;
 import com.university.docassistant.repository.DocumentChunkRepository.ChunkHit;
 import com.university.docassistant.security.AccessControlService;
@@ -146,14 +147,14 @@ public class DocumentQnaService {
             acquired = inFlight.tryAcquire(QUEUE_WAIT_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
-            throw unavailable("AI assistant is busy, try again later");
+            throw unavailable(ErrorCodes.AI_BUSY, "AI assistant is busy, try again later");
         }
         if (!acquired) {
-            throw unavailable("AI assistant is busy, try again later");
+            throw unavailable(ErrorCodes.AI_BUSY, "AI assistant is busy, try again later");
         }
         try {
             return aiClient.chat(systemPrompt, userPrompt)
-                    .orElseThrow(() -> unavailable("AI assistant is temporarily unavailable"));
+                    .orElseThrow(() -> unavailable(ErrorCodes.AI_UNAVAILABLE, "AI assistant is temporarily unavailable"));
         } finally {
             inFlight.release();
         }
@@ -161,7 +162,7 @@ public class DocumentQnaService {
 
     private void requireAi() {
         if (!aiClient.isConfigured()) {
-            throw unavailable("AI assistant is not configured");
+            throw unavailable(ErrorCodes.AI_NOT_CONFIGURED, "AI assistant is not configured");
         }
     }
 
@@ -250,7 +251,7 @@ public class DocumentQnaService {
         return normalized.contains("нет информации по данному вопросу");
     }
 
-    private static ApiException unavailable(String message) {
-        return new ApiException(HttpStatus.SERVICE_UNAVAILABLE, message);
+    private static ApiException unavailable(String code, String message) {
+        return ApiException.of(HttpStatus.SERVICE_UNAVAILABLE, code, message);
     }
 }

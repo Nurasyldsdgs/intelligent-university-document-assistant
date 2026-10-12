@@ -8,7 +8,7 @@ import { ROLE_ADMIN, ROLE_STUDENT } from '../constants/roles'
 import Navbar from '../components/Navbar'
 
 const PAGE_SIZE = 12
-const inputClass = 'w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 dark:focus:ring-indigo-500/30'
+const inputClass = 'w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none transition placeholder:text-slate-500 dark:placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 dark:focus:ring-indigo-500/30'
 
 /** "My courses": enrolled ones for a student, taught ones for a teacher, all for ADMIN (GET /courses). */
 export default function CoursesPage() {
@@ -60,7 +60,7 @@ export default function CoursesPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
           <section>
             {!page && loading ? (
               <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500 dark:text-slate-400">
@@ -71,13 +71,13 @@ export default function CoursesPage() {
                 <BookOpen className="mx-auto h-8 w-8 text-slate-400" />
                 <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-200">Курсов пока нет</p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  {isStudent ? 'Попросите преподавателя прислать ссылку на курс или введите номер курса справа.' : 'Создайте первый курс в форме справа.'}
+                  {isStudent ? 'Попросите преподавателя прислать ссылку-приглашение и откройте её или вставьте в форму справа.' : 'Создайте первый курс в форме справа.'}
                 </p>
               </div>
             ) : page && (
               <>
                 <ul className="grid gap-3 sm:grid-cols-2">
-                  {page.content.map((course) => <CourseCard key={course.id} course={course} />)}
+                  {page.content.map((course) => <CourseCard key={course.id} course={course} showNumber={role === ROLE_ADMIN} />)}
                 </ul>
                 {!page.last && (
                   <button
@@ -94,7 +94,7 @@ export default function CoursesPage() {
           </section>
 
           <aside className="space-y-4">
-            {isStudent ? <OpenCourseForm /> : <CreateCourseForm />}
+            {isStudent ? <JoinByLinkForm /> : <CreateCourseForm />}
           </aside>
         </div>
       </main>
@@ -102,7 +102,7 @@ export default function CoursesPage() {
   )
 }
 
-function CourseCard({ course }) {
+function CourseCard({ course, showNumber }) {
   return (
     <li>
       <Link
@@ -113,7 +113,7 @@ function CourseCard({ course }) {
           {course.code && (
             <span className="rounded-md bg-indigo-50 dark:bg-indigo-500/10 px-1.5 py-0.5 text-xs font-bold text-indigo-700 dark:text-indigo-300">{course.code}</span>
           )}
-          <span className="text-xs text-slate-400">№ {course.id}</span>
+          {showNumber && <span className="text-xs text-slate-500 dark:text-slate-400">№ {course.id}</span>}
         </span>
         <span className="mt-2 font-semibold text-slate-900 dark:text-white">{course.title}</span>
         {course.description && <span className="mt-1 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{course.description}</span>}
@@ -172,16 +172,24 @@ function CreateCourseForm() {
   )
 }
 
-// Students join through the course page; there is no public catalogue, so they open it by link or number.
-function OpenCourseForm() {
+// The code of an invitation link: the part after /join/ of a pasted link, or the code itself.
+function inviteCodeFrom(input) {
+  const value = input.trim()
+  const match = value.match(/\/join\/([^/?#\s]+)/)
+  return match ? match[1] : value.replace(/[/?#\s].*$/, '')
+}
+
+// Students join only through the teacher's invitation link (/join/:code); course numbers are not enough.
+function JoinByLinkForm() {
   const navigate = useNavigate()
-  const [courseId, setCourseId] = useState('')
+  const [link, setLink] = useState('')
+  const code = inviteCodeFrom(link)
 
   return (
     <form
       onSubmit={(event) => {
         event.preventDefault()
-        if (courseId) navigate(`/courses/${courseId}`)
+        if (code) navigate(`/join/${encodeURIComponent(code)}`)
       }}
       className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm"
     >
@@ -189,19 +197,18 @@ function OpenCourseForm() {
         <Search className="h-4 w-4 text-indigo-600" /> Записаться на курс
       </h2>
       <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-        Откройте ссылку от преподавателя или введите номер курса — на его странице будет кнопка «Записаться».
+        Откройте ссылку-приглашение от преподавателя или вставьте её сюда.
       </p>
       <div className="mt-3 flex gap-2">
         <input
-          value={courseId}
-          onChange={(event) => setCourseId(event.target.value.replace(/\D/g, ''))}
-          inputMode="numeric"
-          placeholder="Номер курса"
+          value={link}
+          onChange={(event) => setLink(event.target.value)}
+          placeholder="Ссылка-приглашение"
           className={inputClass}
-          aria-label="Номер курса"
+          aria-label="Ссылка-приглашение"
         />
-        <button type="submit" disabled={!courseId} className="rounded-lg bg-indigo-600 px-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60">
-          Открыть
+        <button type="submit" disabled={!code} className="rounded-lg bg-indigo-600 px-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60">
+          Записаться
         </button>
       </div>
     </form>

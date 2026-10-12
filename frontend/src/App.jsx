@@ -7,6 +7,7 @@ import { ALL_ROLES, ROLE_ADMIN } from './constants/roles'
 import AdminPage from './pages/AdminPage'
 import AuthPage from './pages/AuthPage'
 import CoursePage from './pages/CoursePage'
+import JoinCoursePage from './pages/JoinCoursePage'
 import CoursesPage from './pages/CoursesPage'
 import Dashboard from './pages/Dashboard'
 import DocumentPage from './pages/DocumentPage'
@@ -29,6 +30,7 @@ export default function App() {
               <Route path="/documents/:id" element={<DocumentPage />} />
               <Route path="/courses" element={<CoursesPage />} />
               <Route path="/courses/:id" element={<CoursePage />} />
+              <Route path="/join/:code" element={<JoinCoursePage />} />
             </Route>
             <Route element={<ProtectedRoute allowedRoles={[ROLE_ADMIN]} />}>
               <Route path="/admin" element={<AdminPage />} />

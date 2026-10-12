@@ -85,6 +85,10 @@ app:
     expiration-minutes: 10
     max-attempts: 5
     resend-cooldown-seconds: 60
+  security:
+    # Login brute-force limits key on the client IP. Only behind a reverse proxy that sets X-Forwarded-For may
+    # this be true; otherwise clients could fake their IP and dodge the limit. Default: the TCP peer address.
+    trust-forwarded-for: ${TRUST_FORWARDED_FOR:false}
   frontend-url: ${FRONTEND_URL:http://localhost:5173}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
@@ -93,22 +97,41 @@ app:
     from: ${MAIL_FROM:your-account@example.com}
     from-name: UniDocs Assistant
   storage:
-    # Relative paths resolve against the backend's working directory. Never commit this folder.
+    # Where uploaded files live: "local" (default, a folder on this server) or "s3" (AWS S3 or MinIO).
+    # Switching drivers does not move existing files; copy them first (keys are the stored file names).
+    driver: ${STORAGE_DRIVER:local}
+    # local: relative paths resolve against the backend's working directory. Never commit this folder.
     upload-dir: ${UPLOAD_DIR:uploads}
+    # s3: credentials come from the AWS default chain - AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY as real environment
+    # variables (backend/.env is not read by the AWS SDK), ~/.aws/credentials, or an instance/container role.
+    # Never put keys in this file.
+    s3:
+      bucket: ${S3_BUCKET:}
+      region: ${S3_REGION:eu-central-1}
+      # Only for S3-compatible servers, e.g. MinIO: http://localhost:9000 (leave empty for AWS).
+      endpoint: ${S3_ENDPOINT:}
+      # MinIO needs path-style URLs (http://host/bucket/key); AWS works with the default false.
+      path-style-access: ${S3_PATH_STYLE_ACCESS:false}
   ai:
     # Classification (US-05), deadline extraction and Q&A through an OpenAI-compatible Chat Completions API.
-    # Default: Groq with llama-3.3-70b-versatile; OpenAI, DeepSeek, OpenRouter... work by changing the two lines below.
+    # Default: Groq with openai/gpt-oss-120b; OpenAI, DeepSeek, OpenRouter... work by changing the two lines below.
     # The key comes from AI_API_KEY, else OPENAI_API_KEY (environment or backend/.env, see .env.example).
     # With AI_ENABLED=false or the demo key nothing is sent and uploads work as usual, just without AI.
     enabled: ${AI_ENABLED:true}
     api-key: ${AI_API_KEY:${OPENAI_API_KEY:demo-key}}
-    model: ${AI_MODEL:llama-3.3-70b-versatile}
+    model: ${AI_MODEL:openai/gpt-oss-120b}
     base-url: ${AI_BASE_URL:https://api.groq.com/openai/v1}
     connect-timeout: 10s
     read-timeout: ${AI_READ_TIMEOUT:90s}
     # About 15-25k tokens; the rest of a longer document is not sent.
     max-input-chars: ${AI_MAX_INPUT_CHARS:60000}
-    max-concurrency: ${AI_MAX_CONCURRENCY:4}
+    # Background AI jobs (classification, deadline extraction) running at once. Groq's free tier allows only a few
+    # requests and tokens per minute, so a ZIP of many files at 4+ in parallel quickly hits 429; 2 keeps a batch
+    # moving without tripping the limit. Raise it on a paid plan or another provider.
+    max-concurrency: ${AI_MAX_CONCURRENCY:2}
     queue-capacity: ${AI_QUEUE_CAPACITY:200}
     # Q&A answers synchronously; questions beyond this many in flight get 503 instead of piling up.
     max-concurrent-questions: ${AI_MAX_CONCURRENT_QUESTIONS:20}
+    # Tries per AI call, the first one included, when the API answers 429 (rate limit) or 5xx. Waits for Retry-After
+    # (at most 20 s) or else 2 s, 4 s, ... Other errors and timeouts are never retried. Missing or < 1 means 3.
+    max-attempts: ${AI_MAX_ATTEMPTS:3}

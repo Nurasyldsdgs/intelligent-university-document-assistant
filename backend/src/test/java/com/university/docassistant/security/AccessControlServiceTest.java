@@ -53,6 +53,26 @@ class AccessControlServiceTest {
         return document;
     }
 
+    @Test
+    void studentCannotSeeADocumentTheAiIsStillClassifyingButTheTeacherCan() {
+        // Rule C: it may still turn out to be EXAM_ANSWERS.
+        Document pending = document(100L, course, DocumentVisibility.COURSE_STUDENTS);
+        pending.setAiStatus(com.university.docassistant.entity.AiStatus.PENDING);
+        Document processing = document(101L, course, DocumentVisibility.COURSE_STUDENTS);
+        processing.setAiStatus(com.university.docassistant.entity.AiStatus.PROCESSING);
+        Document done = document(102L, course, DocumentVisibility.COURSE_STUDENTS);
+        done.setAiStatus(com.university.docassistant.entity.AiStatus.DONE);
+
+        assertThat(access.can(student, pending, Permission.VIEW_DOCUMENT)).isFalse();
+        assertThat(access.can(student, processing, Permission.VIEW_DOCUMENT)).isFalse();
+        assertThat(access.can(student, done, Permission.VIEW_DOCUMENT)).isTrue();
+        assertForbidden(() -> access.authorizeDocument(student, 100L, Permission.VIEW_DOCUMENT));
+
+        assertThat(access.can(teacher, pending, Permission.VIEW_DOCUMENT)).isTrue();
+        assertThat(access.authorizeDocument(teacher, 101L, Permission.VIEW_DOCUMENT)).isSameAs(processing);
+        assertThat(access.can(admin, pending, Permission.VIEW_DOCUMENT)).isTrue();
+    }
+
     @BeforeEach
     void setUp() {
         when(courses.findWithTeacherById(10L)).thenReturn(Optional.of(course));

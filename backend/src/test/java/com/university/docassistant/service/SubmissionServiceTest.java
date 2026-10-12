@@ -4,6 +4,7 @@ import com.university.docassistant.entity.Course;
 import com.university.docassistant.entity.Role;
 import com.university.docassistant.entity.User;
 import com.university.docassistant.exception.ApiException;
+import com.university.docassistant.exception.ErrorCodes;
 import com.university.docassistant.repository.AssignmentRepository;
 import com.university.docassistant.repository.CourseRepository;
 import com.university.docassistant.repository.TaskRepository;
@@ -11,6 +12,7 @@ import com.university.docassistant.repository.TaskRepository.TaskAccess;
 import com.university.docassistant.repository.TaskSubmissionRepository;
 import com.university.docassistant.security.AccessControlService;
 import com.university.docassistant.security.Permission;
+import com.university.docassistant.service.storage.StorageService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockMultipartFile;
@@ -35,7 +37,7 @@ class SubmissionServiceTest {
     private final TaskRepository tasks = mock(TaskRepository.class);
     private final CourseRepository courses = mock(CourseRepository.class);
     private final AccessControlService access = mock(AccessControlService.class);
-    private final FileStorageService storage = mock(FileStorageService.class);
+    private final StorageService storage = mock(StorageService.class);
     private final SubmissionService service = new SubmissionService(submissions, tasks,
             mock(AssignmentRepository.class), courses, access, storage, mock(AuditService.class));
 
@@ -108,7 +110,7 @@ class SubmissionServiceTest {
         when(access.currentUser("o@uni.kz")).thenReturn(other);
         when(tasks.findAccessById(7L)).thenReturn(Optional.of(new TaskAccess(7L, 1L, 10L, 3L)));
         when(access.authorizeCourse(other, 10L, Permission.MANAGE_ASSIGNMENTS))
-                .thenThrow(ApiException.forbidden("You are not enrolled in this course"));
+                .thenThrow(ApiException.forbidden(ErrorCodes.COURSE_NOT_ENROLLED, "You are not enrolled in this course"));
 
         assertStatus(() -> service.listForTask(7L, "o@uni.kz"), HttpStatus.FORBIDDEN);
         verify(submissions, never()).findViewsByTaskId(any());

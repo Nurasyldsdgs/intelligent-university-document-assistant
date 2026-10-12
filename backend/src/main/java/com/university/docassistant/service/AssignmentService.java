@@ -9,6 +9,7 @@ import com.university.docassistant.entity.AssignmentStatus;
 import com.university.docassistant.entity.Course;
 import com.university.docassistant.entity.User;
 import com.university.docassistant.exception.ApiException;
+import com.university.docassistant.exception.ErrorCodes;
 import com.university.docassistant.repository.AssignmentRepository;
 import com.university.docassistant.repository.CourseRepository;
 import com.university.docassistant.repository.DocumentRepository;
@@ -68,7 +69,7 @@ public class AssignmentService {
         log.info("User {} created assignment {} in course {} ({} student task(s))",
                 user.getEmail(), assignment.getId(), courseId, handedOut);
         return assignmentRepository.findViewById(assignment.getId())
-                .orElseThrow(() -> ApiException.notFound("Assignment not found"));
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.ASSIGNMENT_NOT_FOUND, "Assignment not found"));
     }
 
     /** Removes the assignment and its students' tasks; for the course teacher or ADMIN. */
@@ -76,7 +77,7 @@ public class AssignmentService {
     public void delete(Long id, String email) {
         User user = access.currentUser(email);
         Long courseId = assignmentRepository.findCourseIdById(id)
-                .orElseThrow(() -> ApiException.notFound("Assignment not found"));
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.ASSIGNMENT_NOT_FOUND, "Assignment not found"));
         access.authorizeCourse(user, courseId, Permission.MANAGE_ASSIGNMENTS);
         taskRepository.deleteByAssignmentIdIn(List.of(id));
         assignmentRepository.deleteById(id);

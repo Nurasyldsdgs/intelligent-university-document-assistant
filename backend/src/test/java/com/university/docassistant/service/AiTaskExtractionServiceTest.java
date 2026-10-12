@@ -28,7 +28,7 @@ class AiTaskExtractionServiceTest {
 
     private final AiClientService client = mock(AiClientService.class);
     private final AiProperties properties = new AiProperties(true, "key", "model", "http://localhost",
-            Duration.ofSeconds(1), Duration.ofSeconds(1), 1_000, 1, 1, 1);
+            Duration.ofSeconds(1), Duration.ofSeconds(1), 1_000, 1, 1, 1, 1);
     private final AiTaskExtractionService service = new AiTaskExtractionService(client, properties, new ObjectMapper(),
             Clock.fixed(Instant.parse("2026-10-03T08:00:00Z"), ZoneOffset.UTC));
 

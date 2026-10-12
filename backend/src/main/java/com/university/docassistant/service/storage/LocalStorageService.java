@@ -1,7 +1,8 @@
-package com.university.docassistant.service;
+package com.university.docassistant.service.storage;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -17,20 +18,23 @@ import java.util.UUID;
 /**
  * Stores uploaded files as-is under {@code app.storage.upload-dir}, each under a random UUID name.
  * Content is streamed in both directions, so a file is never held in memory as a whole.
+ * The default driver ({@code app.storage.driver=local} or unset).
  */
 @Slf4j
 @Service
-public class FileStorageService {
+@ConditionalOnProperty(name = "app.storage.driver", havingValue = "local", matchIfMissing = true)
+public class LocalStorageService implements StorageService {
 
     private final Path uploadDir;
 
-    public FileStorageService(@Value("${app.storage.upload-dir}") String uploadDir) throws IOException {
+    public LocalStorageService(@Value("${app.storage.upload-dir}") String uploadDir) throws IOException {
         this.uploadDir = Path.of(uploadDir).toAbsolutePath().normalize();
         Files.createDirectories(this.uploadDir);
         log.info("Document storage at {}", this.uploadDir);
     }
 
     /** Writes the upload to disk; returns the generated stored file name. */
+    @Override
     public String store(MultipartFile file) {
         String storedFileName = UUID.randomUUID().toString();
         try (InputStream in = file.getInputStream()) {
@@ -43,6 +47,7 @@ public class FileStorageService {
     }
 
     /** Writes content already in memory (e.g. a file from a ZIP archive); returns the generated stored file name. */
+    @Override
     public String store(byte[] content) {
         String storedFileName = UUID.randomUUID().toString();
         try {
@@ -54,6 +59,7 @@ public class FileStorageService {
         return storedFileName;
     }
 
+    @Override
     public Resource load(String storedFileName) {
         Path path = resolve(storedFileName);
         if (!Files.isReadable(path)) {
@@ -62,6 +68,7 @@ public class FileStorageService {
         return new FileSystemResource(path);
     }
 
+    @Override
     public void delete(String storedFileName) {
         try {
             Files.deleteIfExists(resolve(storedFileName));

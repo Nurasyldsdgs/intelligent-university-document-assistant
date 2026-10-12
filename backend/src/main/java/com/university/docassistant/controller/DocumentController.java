@@ -2,6 +2,8 @@ package com.university.docassistant.controller;
 
 import com.university.docassistant.dto.AssignmentDtos.AssignmentResponse;
 import com.university.docassistant.dto.DocumentResponse;
+import com.university.docassistant.dto.DocumentStatusItem;
+import com.university.docassistant.dto.DocumentStatusResponse;
 import com.university.docassistant.dto.AuthDtos.MessageResponse;
 import com.university.docassistant.dto.DocumentAnalysisResponse;
 import com.university.docassistant.dto.DocumentAnswerResponse;
@@ -13,6 +15,7 @@ import com.university.docassistant.entity.Document;
 import com.university.docassistant.entity.DocumentCategory;
 import com.university.docassistant.entity.DocumentVisibility;
 import com.university.docassistant.exception.ApiException;
+import com.university.docassistant.exception.ErrorCodes;
 import com.university.docassistant.service.DocumentQnaService;
 import com.university.docassistant.service.DocumentService;
 import com.university.docassistant.service.DocumentService.DocumentContent;
@@ -144,6 +147,30 @@ public class DocumentController {
         return ResponseEntity.accepted().body(new MessageResponse("AI analysis started"));
     }
 
+    /**
+     * The same state for up to 50 documents at once ({@code ?ids=1,2,3}), for polling lists; documents the user may
+     * not view are simply missing from the answer.
+     */
+    @GetMapping("/status")
+    public List<DocumentStatusItem> statuses(@RequestParam(value = "ids", required = false) List<Long> ids,
+                                             @AuthenticationPrincipal UserDetails principal) {
+        return documentService.statuses(ids, principal.getUsername());
+    }
+
+    /** Background AI state of the document: aiStatus, category, confidence, number of assignments found in it. */
+    @GetMapping("/{id}/status")
+    public DocumentStatusResponse status(@PathVariable Long id, @AuthenticationPrincipal UserDetails principal) {
+        return documentService.status(id, principal.getUsername());
+    }
+
+    /** Queues a new AI classification of the document (aiStatus becomes PENDING); 503 when the AI is unavailable. */
+    @PostMapping("/{id}/reclassify")
+    public ResponseEntity<MessageResponse> reclassify(@PathVariable Long id,
+                                                      @AuthenticationPrincipal UserDetails principal) {
+        documentService.reclassify(id, principal.getUsername());
+        return ResponseEntity.accepted().body(new MessageResponse("AI classification started"));
+    }
+
     /** Answers a question from this document's text, citing the fragments used; 503 when the AI is unavailable. */
     @PostMapping("/{id}/ask")
     public DocumentAnswerResponse ask(@PathVariable Long id,
@@ -186,7 +213,7 @@ public class DocumentController {
 
         MediaType contentType = MediaType.parseMediaType(document.getContentType());
         if (!INLINE_CONTENT_TYPES.contains(contentType.getType() + "/" + contentType.getSubtype())) {
-            throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Preview is not available for this file type");
+            throw ApiException.of(HttpStatus.UNSUPPORTED_MEDIA_TYPE, ErrorCodes.PREVIEW_NOT_AVAILABLE, "Preview is not available for this file type");
         }
 
         ContentDisposition disposition = ContentDisposition.inline()

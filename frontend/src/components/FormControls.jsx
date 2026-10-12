@@ -18,7 +18,7 @@ export function TextField({ label, icon: Icon, id, type = 'text', error, ...prop
         <input
           id={id}
           type={isPassword && showPassword ? 'text' : type}
-          className={`w-full rounded-lg border bg-white dark:bg-slate-900 py-2.5 text-sm text-slate-900 dark:text-white outline-none transition placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-4 ${
+          className={`w-full rounded-lg border bg-white dark:bg-slate-900 py-2.5 text-sm text-slate-900 dark:text-white outline-none transition placeholder:text-slate-500 dark:placeholder:text-slate-400 focus:ring-4 ${
             Icon ? 'pl-10' : 'pl-3'
           } ${isPassword ? 'pr-10' : 'pr-3'} ${
             error
@@ -32,9 +32,9 @@ export function TextField({ label, icon: Icon, id, type = 'text', error, ...prop
           <button
             type="button"
             onClick={() => setShowPassword((value) => !value)}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
             aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
-            tabIndex={-1}
+            aria-pressed={showPassword}
           >
             {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
           </button>

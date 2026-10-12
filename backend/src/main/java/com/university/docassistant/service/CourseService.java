@@ -9,19 +9,26 @@ import com.university.docassistant.entity.Course;
 import com.university.docassistant.entity.Role;
 import com.university.docassistant.entity.User;
 import com.university.docassistant.exception.ApiException;
+import com.university.docassistant.exception.ErrorCodes;
 import com.university.docassistant.repository.CourseRepository;
 import com.university.docassistant.repository.EnrollmentRepository;
 import com.university.docassistant.repository.TaskRepository;
 import com.university.docassistant.repository.UserRepository;
 import com.university.docassistant.security.AccessControlService;
+import com.university.docassistant.security.JoinAttemptLimiter;
 import com.university.docassistant.security.Permission;
+import com.university.docassistant.util.InviteCodes;
+import com.university.docassistant.util.LikePatterns;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+
+import java.util.Optional;
 
 /**
  * "My courses": the enrolled ones for a STUDENT, the taught ones for a TEACHER, all of them for ADMIN.
@@ -41,17 +48,27 @@ public class CourseService {
     private final AssignmentService assignmentService;
     private final AccessControlService access;
     private final AuditService auditService;
+    private final JoinAttemptLimiter joinAttemptLimiter;
+
+    static final String COURSE_NOT_FOUND = "Курс не найден";
+    static final String TEACHER_ROLE_PENDING_MESSAGE =
+            "Заявка на роль преподавателя ещё не подтверждена деканатом. До подтверждения вы работаете как студент.";
+    static final String ONLY_STUDENTS_JOIN = "Присоединиться к курсу по ссылке могут только студенты";
+    static final String JOIN_BY_LINK_ONLY = "Записаться на курс можно только по ссылке-приглашению преподавателя";
 
     @Transactional
     public CourseResponse create(CreateCourseRequest request, String email) {
         User user = access.currentUser(email);
         if (!Permission.granted(user.getRole(), Permission.MANAGE_COURSE)) {
-            throw ApiException.forbidden("Only TEACHER or ADMIN can create courses");
+            if (user.isTeacherRequested()) {
+                throw ApiException.forbidden(ErrorCodes.TEACHER_ROLE_PENDING, TEACHER_ROLE_PENDING_MESSAGE);
+            }
+            throw ApiException.forbidden(ErrorCodes.COURSE_CREATE_FORBIDDEN, "Only TEACHER or ADMIN can create courses");
         }
         User teacher = user;
         if (request.teacherId() != null && !request.teacherId().equals(user.getId())) {
             if (user.getRole() != Role.ROLE_ADMIN) {
-                throw ApiException.forbidden("Only ADMIN can create a course for another teacher");
+                throw ApiException.forbidden(ErrorCodes.ADMIN_ONLY, "Only ADMIN can create a course for another teacher");
             }
             teacher = requireTeacher(request.teacherId());
         }
@@ -69,13 +86,21 @@ public class CourseService {
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<CourseResponse> listMine(String email, Pageable pageable) {
+    public PageResponse<CourseResponse> listMine(String email, String query, Pageable pageable) {
         User user = access.currentUser(email);
-        Page<Course> courses = switch (user.getRole()) {
-            case ROLE_ADMIN -> courseRepository.findAllWithTeacher(pageable);
-            case ROLE_TEACHER -> courseRepository.findByTeacherId(user.getId(), pageable);
-            case ROLE_STUDENT -> courseRepository.findByStudentId(user.getId(), pageable);
-        };
+        // Title or code search within the user's own courses; terms under 2 characters list everything.
+        String pattern = LikePatterns.contains(query);
+        Page<Course> courses = pattern == null
+                ? switch (user.getRole()) {
+                    case ROLE_ADMIN -> courseRepository.findAllWithTeacher(pageable);
+                    case ROLE_TEACHER -> courseRepository.findByTeacherId(user.getId(), pageable);
+                    case ROLE_STUDENT -> courseRepository.findByStudentId(user.getId(), pageable);
+                }
+                : switch (user.getRole()) {
+                    case ROLE_ADMIN -> courseRepository.searchAll(pattern, pageable);
+                    case ROLE_TEACHER -> courseRepository.searchByTeacherId(user.getId(), pattern, pageable);
+                    case ROLE_STUDENT -> courseRepository.searchByStudentId(user.getId(), pattern, pageable);
+                };
         return PageResponse.of(courses.map(CourseService::toResponse));
     }
 
@@ -99,34 +124,90 @@ public class CourseService {
                 .map(student -> new StudentResponse(student.getId(), student.getFullName(), student.getEmail())));
     }
 
+    /**
+     * The course's teacher or ADMIN enrolls a specific student. Students cannot enroll themselves here: course ids
+     * are sequential, so they join only through the invitation code ({@link #join}).
+     */
     @Transactional
     public void enroll(Long courseId, Long studentId, String email) {
         User user = access.currentUser(email);
-        Course course = courseRepository.findWithTeacherById(courseId)
-                .orElseThrow(() -> ApiException.notFound("Course not found"));
-
-        User student;
         if (studentId == null || studentId.equals(user.getId())) {
-            // Self-enrollment through the invitation link the teacher shares.
-            if (user.getRole() != Role.ROLE_STUDENT) {
-                throw ApiException.badRequest("Only students can enroll in a course");
+            if (user.getRole() == Role.ROLE_STUDENT) {
+                auditService.record(user.getEmail(), AuditService.ACCESS_DENIED, "self-enroll by id in course " + courseId);
+                throw ApiException.forbidden(ErrorCodes.ENROLL_BY_LINK_ONLY, JOIN_BY_LINK_ONLY);
             }
-            student = user;
-        } else {
-            access.authorizeCourse(user, course.getId(), Permission.MANAGE_COURSE);
-            student = userRepository.findById(studentId)
-                    .orElseThrow(() -> ApiException.notFound("Student not found"));
-            if (student.getRole() != Role.ROLE_STUDENT) {
-                throw ApiException.badRequest("Only students can be enrolled in a course");
-            }
+            throw ApiException.badRequest(ErrorCodes.NOT_A_STUDENT, "Only students can enroll in a course");
+        }
+        Course course = courseRepository.findWithTeacherById(courseId)
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.COURSE_NOT_FOUND, "Course not found"));
+
+        access.authorizeCourse(user, course.getId(), Permission.MANAGE_COURSE);
+        User student = userRepository.findById(studentId)
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.STUDENT_NOT_FOUND, "Student not found"));
+        if (student.getRole() != Role.ROLE_STUDENT) {
+            throw ApiException.badRequest(ErrorCodes.NOT_A_STUDENT, "Only students can be enrolled in a course");
         }
 
+        enrollStudent(user, course, student);
+    }
+
+    /**
+     * A student joins the course behind an invitation code. Joining twice is not an error. A wrong code gives the
+     * same 404 whether or not some course exists, is audited, and counts towards {@link JoinAttemptLimiter}
+     * (429 once exceeded). Returns the course id.
+     */
+    @Transactional
+    public Long join(String code, String email) {
+        User user = access.currentUser(email);
+        if (user.getRole() != Role.ROLE_STUDENT) {
+            throw ApiException.forbidden(ErrorCodes.NOT_A_STUDENT, ONLY_STUDENTS_JOIN);
+        }
+        long blockedFor = joinAttemptLimiter.blockedForSeconds(user.getId());
+        if (blockedFor > 0) {
+            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "Слишком много попыток с неверным кодом. "
+                    + "Попробуйте через " + Math.max(1, (blockedFor + 59) / 60) + " мин.", ErrorCodes.TOO_MANY_ATTEMPTS, blockedFor);
+        }
+        String candidate = code == null ? "" : code.strip();
+        Optional<Course> course = InviteCodes.FORMAT.matcher(candidate).matches()
+                ? courseRepository.findByInviteCode(candidate)
+                : Optional.empty();
+        if (course.isEmpty()) {
+            joinAttemptLimiter.recordFailure(user.getId());
+            // Only a prefix: a mistyped code may be close to a real one.
+            auditService.record(user.getEmail(), AuditService.COURSE_JOIN_FAILED, "invalid invitation code \""
+                    + (candidate.length() > 4 ? candidate.substring(0, 4) + "…" : candidate) + "\"");
+            throw ApiException.notFound(ErrorCodes.INVITE_INVALID, COURSE_NOT_FOUND);
+        }
+        enrollStudent(user, course.get(), user);
+        return course.get().getId();
+    }
+
+    /** The invitation code of the course; for its teacher and ADMIN. */
+    @Transactional(readOnly = true)
+    public String inviteCode(Long courseId, String email) {
+        return access.authorizeCourse(access.currentUser(email), courseId, Permission.MANAGE_COURSE).getInviteCode();
+    }
+
+    /** Replaces the invitation code; the old link stops working at once. For the course's teacher and ADMIN. */
+    @Transactional
+    public String regenerateInviteCode(Long courseId, String email) {
+        User user = access.currentUser(email);
+        Course course = access.authorizeCourse(user, courseId, Permission.MANAGE_COURSE);
+        course.setInviteCode(InviteCodes.generate());
+        courseRepository.save(course);
+        auditService.record(user.getEmail(), AuditService.COURSE_INVITE_REGENERATED, "Course " + courseId);
+        log.info("User {} regenerated the invitation link of course {}", user.getEmail(), courseId);
+        return course.getInviteCode();
+    }
+
+    /** Idempotent: an already enrolled student is left as is. New students get the course's tasks. */
+    private void enrollStudent(User actor, Course course, User student) {
         if (enrollmentRepository.enroll(course.getId(), student.getId()) > 0) {
             int tasks = assignmentService.handOut(course.getId());
-            auditService.record(user.getEmail(), AuditService.STUDENT_ENROLLED,
-                    student.getEmail() + " in course " + courseId);
+            auditService.record(actor.getEmail(), AuditService.STUDENT_ENROLLED,
+                    student.getEmail() + " in course " + course.getId());
             log.info("User {} enrolled {} in course {} ({} task(s) handed out)",
-                    user.getEmail(), student.getEmail(), courseId, tasks);
+                    actor.getEmail(), student.getEmail(), course.getId(), tasks);
         }
     }
 
@@ -137,7 +218,7 @@ public class CourseService {
         if (!studentId.equals(user.getId())) {
             access.authorizeCourse(user, courseId, Permission.MANAGE_COURSE);
         } else if (!courseRepository.existsById(courseId)) {
-            throw ApiException.notFound("Course not found");
+            throw ApiException.notFound(ErrorCodes.COURSE_NOT_FOUND, "Course not found");
         }
         if (enrollmentRepository.unenroll(courseId, studentId) > 0) {
             taskRepository.deleteByCourseIdAndUserId(courseId, studentId);
@@ -152,10 +233,10 @@ public class CourseService {
     public CourseResponse assignTeacher(Long courseId, Long teacherId, String email) {
         User admin = access.currentUser(email);
         if (!Permission.granted(admin.getRole(), Permission.MANAGE_SYSTEM)) {
-            throw ApiException.forbidden("Only ADMIN can change the teacher of a course");
+            throw ApiException.forbidden(ErrorCodes.ADMIN_ONLY, "Only ADMIN can change the teacher of a course");
         }
         Course course = courseRepository.findWithTeacherById(courseId)
-                .orElseThrow(() -> ApiException.notFound("Course not found"));
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.COURSE_NOT_FOUND, "Course not found"));
         course.setTeacher(requireTeacher(teacherId));
         auditService.record(admin.getEmail(), AuditService.COURSE_TEACHER_CHANGED,
                 "Course " + courseId + " now taught by " + course.getTeacher().getEmail());
@@ -165,9 +246,9 @@ public class CourseService {
 
     private User requireTeacher(Long teacherId) {
         User teacher = userRepository.findById(teacherId)
-                .orElseThrow(() -> ApiException.notFound("Teacher not found"));
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.TEACHER_NOT_FOUND, "Teacher not found"));
         if (teacher.getRole() != Role.ROLE_TEACHER) {
-            throw ApiException.badRequest("The user is not a TEACHER");
+            throw ApiException.badRequest(ErrorCodes.NOT_A_TEACHER, "The user is not a TEACHER");
         }
         return teacher;
     }

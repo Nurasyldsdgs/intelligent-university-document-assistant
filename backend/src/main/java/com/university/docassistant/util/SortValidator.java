@@ -1,6 +1,7 @@
 package com.university.docassistant.util;
 
 import com.university.docassistant.exception.ApiException;
+import com.university.docassistant.exception.ErrorCodes;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
@@ -18,7 +19,7 @@ public final class SortValidator {
     public static Pageable requireSortable(Pageable pageable, Set<String> allowed) {
         for (Sort.Order order : pageable.getSort()) {
             if (!allowed.contains(order.getProperty())) {
-                throw ApiException.badRequest("Cannot sort by '" + order.getProperty() + "'; allowed: " + allowed);
+                throw ApiException.badRequest(ErrorCodes.SORT_NOT_ALLOWED, "Cannot sort by '" + order.getProperty() + "'; allowed: " + allowed);
             }
         }
         return pageable;

@@ -45,8 +45,6 @@ export function isImage(doc) {
   return baseContentType(doc.contentType).startsWith('image/')
 }
 
-export const dateFormatter = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })
-
 export function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} Б`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`

@@ -11,6 +11,8 @@ import java.time.Duration;
  * @param maxConcurrency analyses running at the same time; the rest wait in a queue of {@code queueCapacity}
  * @param maxConcurrentQuestions Q&A calls in flight at once; each holds a request thread while the model answers,
  *                               so this caps how many threads slow AI answers can occupy
+ * @param maxAttempts    tries per call when the API answers 429 or 5xx (rate limits, overload); the first try
+ *                       included. Missing or below 1 means {@value #DEFAULT_MAX_ATTEMPTS}
  */
 @ConfigurationProperties(prefix = "app.ai")
 public record AiProperties(
@@ -23,14 +25,18 @@ public record AiProperties(
         int maxInputChars,
         int maxConcurrency,
         int queueCapacity,
-        int maxConcurrentQuestions
+        int maxConcurrentQuestions,
+        int maxAttempts
 ) {
     /** Placeholder key from application.yml: treated like a missing key. */
     public static final String DEMO_KEY = "demo-key";
+    public static final int DEFAULT_MAX_ATTEMPTS = 3;
 
     public AiProperties {
         // A key pasted with a stray space or newline would otherwise break the Authorization header.
         apiKey = apiKey == null ? null : apiKey.strip();
+        // An absent app.ai.max-attempts binds as 0.
+        maxAttempts = maxAttempts < 1 ? DEFAULT_MAX_ATTEMPTS : maxAttempts;
     }
 
     /** True only when a call can actually be made; otherwise analysis is skipped without contacting the API. */

@@ -29,7 +29,7 @@ function AccessDenied() {
         <span className="flex h-16 w-16 items-center justify-center rounded-full bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-400">
           <ShieldX className="h-8 w-8" />
         </span>
-        <p className="mt-5 text-sm font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">403 Access Denied</p>
+        <p className="mt-5 text-sm font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">Ошибка 403</p>
         <h1 className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">Доступ запрещён</h1>
         <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
           У вашей роли нет прав для просмотра этой страницы. Если это ошибка, обратитесь в деканат.

@@ -5,6 +5,7 @@ import com.university.docassistant.entity.Course;
 import com.university.docassistant.entity.TaskSubmission;
 import com.university.docassistant.entity.User;
 import com.university.docassistant.exception.ApiException;
+import com.university.docassistant.exception.ErrorCodes;
 import com.university.docassistant.repository.AssignmentRepository;
 import com.university.docassistant.repository.CourseRepository;
 import com.university.docassistant.repository.TaskRepository;
@@ -13,6 +14,7 @@ import com.university.docassistant.repository.TaskSubmissionRepository;
 import com.university.docassistant.repository.TaskSubmissionRepository.SubmissionAccess;
 import com.university.docassistant.security.AccessControlService;
 import com.university.docassistant.security.Permission;
+import com.university.docassistant.service.storage.StorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;
@@ -44,7 +46,7 @@ public class SubmissionService {
     private final AssignmentRepository assignmentRepository;
     private final CourseRepository courseRepository;
     private final AccessControlService access;
-    private final FileStorageService fileStorageService;
+    private final StorageService storageService;
     private final AuditService auditService;
 
     public record SubmissionContent(SubmissionAccess submission, Resource content) {
@@ -58,22 +60,22 @@ public class SubmissionService {
         User student = access.currentUser(email);
         if (!Permission.granted(student.getRole(), Permission.SUBMIT_TASK)) {
             auditService.record(student.getEmail(), AuditService.ACCESS_DENIED, "SUBMIT_TASK on task " + taskId);
-            throw ApiException.forbidden("Сдавать решения заданий могут только студенты");
+            throw ApiException.forbidden(ErrorCodes.NOT_A_STUDENT, "Сдавать решения заданий могут только студенты");
         }
         TaskAccess task = taskRepository.findAccessById(taskId)
-                .orElseThrow(() -> ApiException.notFound("Task not found"));
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.TASK_NOT_FOUND, "Task not found"));
         if (!task.userId().equals(student.getId())) {
             auditService.record(student.getEmail(), AuditService.ACCESS_DENIED, "SUBMIT_TASK on task " + taskId);
-            throw ApiException.forbidden("Можно сдавать решения только к своим задачам");
+            throw ApiException.forbidden(ErrorCodes.TASK_NOT_OWN, "Можно сдавать решения только к своим задачам");
         }
         if (task.courseId() == null || task.assignmentId() == null) {
-            throw ApiException.badRequest("Эта задача не относится к заданию курса, к ней нельзя прикрепить решение");
+            throw ApiException.badRequest(ErrorCodes.TASK_NOT_SUBMITTABLE, "Эта задача не относится к заданию курса, к ней нельзя прикрепить решение");
         }
         Course course = courseRepository.findById(task.courseId())
-                .orElseThrow(() -> ApiException.notFound("Course not found"));
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.COURSE_NOT_FOUND, "Course not found"));
         if (!access.isMember(student, course)) {
             auditService.record(student.getEmail(), AuditService.ACCESS_DENIED, "SUBMIT_TASK on task " + taskId);
-            throw ApiException.forbidden("You are not enrolled in this course");
+            throw ApiException.forbidden(ErrorCodes.COURSE_NOT_ENROLLED, "You are not enrolled in this course");
         }
 
         List<PreparedFile> prepared = prepare(files);
@@ -82,7 +84,7 @@ public class SubmissionService {
         try {
             List<TaskSubmission> rows = new ArrayList<>();
             for (PreparedFile file : prepared) {
-                String storedFileName = fileStorageService.store(file.content());
+                String storedFileName = storageService.store(file.content());
                 storedFileNames.add(storedFileName);
                 rows.add(TaskSubmission.builder()
                         .task(taskRepository.getReferenceById(taskId))
@@ -95,7 +97,7 @@ public class SubmissionService {
             }
             ids = submissionRepository.saveAll(rows).stream().map(TaskSubmission::getId).toList();
         } catch (RuntimeException ex) {
-            storedFileNames.forEach(fileStorageService::delete);
+            storedFileNames.forEach(storageService::delete);
             throw ex;
         }
         auditService.record(student.getEmail(), AuditService.TASK_SUBMITTED,
@@ -110,7 +112,7 @@ public class SubmissionService {
     public List<SubmissionResponse> listForTask(Long taskId, String email) {
         User user = access.currentUser(email);
         TaskAccess task = taskRepository.findAccessById(taskId)
-                .orElseThrow(() -> ApiException.notFound("Task not found"));
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.TASK_NOT_FOUND, "Task not found"));
         authorizeRead(user, task.userId(), task.courseId(), "task " + taskId);
         return submissionRepository.findViewsByTaskId(taskId);
     }
@@ -120,7 +122,7 @@ public class SubmissionService {
     public List<SubmissionResponse> listForAssignment(Long assignmentId, String email) {
         User user = access.currentUser(email);
         Long courseId = assignmentRepository.findCourseIdById(assignmentId)
-                .orElseThrow(() -> ApiException.notFound("Assignment not found"));
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.ASSIGNMENT_NOT_FOUND, "Assignment not found"));
         access.authorizeCourse(user, courseId, Permission.MANAGE_ASSIGNMENTS);
         return submissionRepository.findViewsByAssignmentId(assignmentId);
     }
@@ -129,9 +131,9 @@ public class SubmissionService {
     public SubmissionContent download(Long id, String email) {
         User user = access.currentUser(email);
         SubmissionAccess submission = submissionRepository.findAccessById(id)
-                .orElseThrow(() -> ApiException.notFound("Submission not found"));
+                .orElseThrow(() -> ApiException.notFound(ErrorCodes.SUBMISSION_NOT_FOUND, "Submission not found"));
         authorizeRead(user, submission.studentId(), submission.courseId(), "submission " + id);
-        return new SubmissionContent(submission, fileStorageService.load(submission.storedFileName()));
+        return new SubmissionContent(submission, storageService.load(submission.storedFileName()));
     }
 
     /** The submitting student reads their own work; otherwise the course must be managed by the user (403/404). */
@@ -141,7 +143,7 @@ public class SubmissionService {
         }
         if (courseId == null) {
             auditService.record(user.getEmail(), AuditService.ACCESS_DENIED, "VIEW " + what);
-            throw ApiException.forbidden("Access denied");
+            throw ApiException.forbidden(ErrorCodes.ACCESS_DENIED, "Access denied");
         }
         access.authorizeCourse(user, courseId, Permission.MANAGE_ASSIGNMENTS);
     }
@@ -151,22 +153,22 @@ public class SubmissionService {
 
     private static List<PreparedFile> prepare(List<MultipartFile> files) {
         if (files == null || files.isEmpty()) {
-            throw ApiException.badRequest("Не выбрано ни одного файла");
+            throw ApiException.badRequest(ErrorCodes.UPLOAD_EMPTY, "Не выбрано ни одного файла");
         }
         if (files.size() > MAX_FILES_PER_SUBMISSION) {
-            throw ApiException.badRequest("К решению можно приложить не больше " + MAX_FILES_PER_SUBMISSION + " файлов");
+            throw ApiException.badRequest(ErrorCodes.UPLOAD_TOO_MANY_FILES, "К решению можно приложить не больше " + MAX_FILES_PER_SUBMISSION + " файлов");
         }
         List<PreparedFile> prepared = new ArrayList<>();
         for (MultipartFile file : files) {
             String fileName = DocumentService.sanitizeFileName(file.getOriginalFilename());
             if (file.isEmpty()) {
-                throw ApiException.badRequest("Файл «" + fileName + "» пустой");
+                throw ApiException.badRequest(ErrorCodes.UPLOAD_EMPTY, "Файл «" + fileName + "» пустой");
             }
             if (!DocumentService.isAllowedDocument(fileName)) {
-                throw ApiException.badRequest("Файл «" + fileName + "»: неподдерживаемый формат");
+                throw ApiException.badRequest(ErrorCodes.UPLOAD_UNSUPPORTED_TYPE, "Файл «" + fileName + "»: неподдерживаемый формат");
             }
             if (file.getSize() > DocumentService.MAX_DOCUMENT_BYTES) {
-                throw ApiException.badRequest("Файл «" + fileName + "» больше "
+                throw ApiException.badRequest(ErrorCodes.UPLOAD_TOO_LARGE, "Файл «" + fileName + "» больше "
                         + DocumentService.MAX_DOCUMENT_BYTES / (1024 * 1024) + " МБ");
             }
             try {

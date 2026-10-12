@@ -63,11 +63,13 @@ public final class AuthDtos {
     ) {
     }
 
+    /** {@code teacherRequested}: a teacher role request is waiting for ADMIN (the role is still ROLE_STUDENT). */
     public record AuthResponse(
             String token,
             String email,
             String fullName,
-            Role role
+            Role role,
+            boolean teacherRequested
     ) {
     }
 
@@ -77,7 +79,8 @@ public final class AuthDtos {
             String fullName,
             Role role,
             AuthProvider provider,
-            boolean emailVerified
+            boolean emailVerified,
+            boolean teacherRequested
     ) {
     }
 

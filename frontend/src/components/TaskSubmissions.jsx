@@ -4,6 +4,7 @@ import api, { getBlobErrorMessage } from '../api/axios'
 import { useToast } from '../context/ToastContext'
 import { DOCUMENT_EXTENSIONS } from '../constants/documents'
 import { formatSize } from '../utils/fileTypes'
+import { formatDateTime } from '../utils/dates'
 
 // Must match SubmissionService.MAX_FILES_PER_SUBMISSION and DocumentService.MAX_DOCUMENT_BYTES.
 const MAX_FILES = 10
@@ -146,14 +147,19 @@ export default function TaskSubmissions({ taskId, assignmentId, count = 0 }) {
           <ul className="mt-1.5 space-y-1">
             {items.map((item) => (
               <li key={item.id} className="flex items-center gap-2 text-[11px]">
-                {!own && (
-                  <span className="max-w-40 shrink-0 truncate font-medium text-slate-700 dark:text-slate-200" title={item.studentEmail}>
-                    {item.studentFullName || item.studentEmail}
-                  </span>
-                )}
-                <span className="min-w-0 flex-1 truncate text-slate-600 dark:text-slate-300" title={item.originalFileName}>{item.originalFileName}</span>
-                <span className="shrink-0 text-slate-400">{formatSize(item.fileSize)} · {new Date(item.submittedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}</span>
-                <button type="button" onClick={() => download(item)} className="shrink-0 rounded p-0.5 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400" aria-label={`Скачать ${item.originalFileName}`}>
+                {/* Below sm: two lines - the name(s), then "size · date". */}
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-2">
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    {!own && (
+                      <span className="max-w-[45%] shrink-0 truncate font-medium text-slate-700 dark:text-slate-200 sm:max-w-40" title={item.studentEmail}>
+                        {item.studentFullName || item.studentEmail}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-slate-600 dark:text-slate-300" title={item.originalFileName}>{item.originalFileName}</span>
+                  </div>
+                  <span className="shrink-0 text-slate-500 dark:text-slate-400">{formatSize(item.fileSize)} · {formatDateTime(item.submittedAt)}</span>
+                </div>
+                <button type="button" onClick={() => download(item)} className="shrink-0 rounded p-1 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400" aria-label={`Скачать ${item.originalFileName}`}>
                   <Download className="h-3.5 w-3.5" />
                 </button>
               </li>

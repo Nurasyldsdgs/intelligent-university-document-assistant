@@ -23,6 +23,16 @@ public final class AdminDtos {
     ) {
     }
 
+    /** A registered STUDENT waiting for the teacher role; {@code requestedAt} is the registration time. */
+    public record TeacherRequestResponse(
+            Long id,
+            String fullName,
+            String email,
+            boolean emailVerified,
+            LocalDateTime requestedAt
+    ) {
+    }
+
     public record UpdateRoleRequest(
             @NotNull Role role
     ) {

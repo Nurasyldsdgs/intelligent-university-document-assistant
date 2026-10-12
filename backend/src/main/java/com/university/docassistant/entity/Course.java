@@ -1,5 +1,6 @@
 package com.university.docassistant.entity;
 
+import com.university.docassistant.util.InviteCodes;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -9,6 +10,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -45,8 +47,23 @@ public class Course {
     @Column(columnDefinition = "TEXT")
     private String description;
 
+    /**
+     * Secret part of the invitation link /join/{code}: the only way a student joins the course. Never sent to
+     * students. NOT NULL and unique in the database (CourseInviteCodeMigration; ddl-auto alone cannot add a NOT NULL
+     * column to a table with rows), so it is not marked nullable=false here.
+     */
+    @Column(name = "invite_code", length = 64)
+    private String inviteCode;
+
     /** Null once the teacher's account is deleted. */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "teacher_id")
     private User teacher;
+
+    @PrePersist
+    protected void onCreate() {
+        if (inviteCode == null) {
+            inviteCode = InviteCodes.generate();
+        }
+    }
 }

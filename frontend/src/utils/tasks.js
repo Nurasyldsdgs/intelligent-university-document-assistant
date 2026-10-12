@@ -1,3 +1,4 @@
+import { formatDateTime } from './dates'
 // Tasks carry no type of their own; the label is guessed from the words the AI used in the title and description.
 const TASK_TYPES = [
   { pattern: /лаборатор|лаб\.|\blab/i, label: 'Лабораторная', badge: 'bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-500/10 dark:text-sky-300 dark:ring-sky-500/30' },
@@ -19,7 +20,6 @@ export function getTaskType(task) {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
-const deadlineFormatter = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
 const TONES = {
   overdue: 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-500/10 dark:text-red-300 dark:ring-red-500/30',
@@ -35,7 +35,7 @@ const TONES = {
 export function getDeadlineInfo(deadline, status, now = Date.now()) {
   if (!deadline) return { label: 'Без срока', tone: TONES.none }
   const date = new Date(deadline)
-  const formatted = deadlineFormatter.format(date)
+  const formatted = formatDateTime(deadline)
   const diff = date.getTime() - now
   if (status === 'COMPLETED') return { label: formatted, tone: TONES.later }
   if (diff < 0) return { label: `Просрочено · ${formatted}`, tone: TONES.overdue }

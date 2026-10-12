@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { CalendarClock, FileText, Loader2, Trash2 } from 'lucide-react'
 import { TASK_STATUS_LABELS } from '../constants/documents'
 import { getDeadlineInfo, getTaskType } from '../utils/tasks'
@@ -23,11 +23,12 @@ export default function TaskItem({ task, onStatusChange, onDelete, updating = fa
   const completed = task.status === 'COMPLETED'
   const documentId = task.documentId ?? task.sourceDocumentId
   const documentName = task.documentName ?? task.sourceDocumentName
+  const location = useLocation()
 
   return (
     <li className="flex flex-col gap-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 sm:flex-row sm:items-start">
       <div className="min-w-0 flex-1">
-        <p className={`text-sm font-medium ${completed ? 'text-slate-400 line-through dark:text-slate-500' : 'text-slate-900 dark:text-white'}`}>
+        <p className={`text-sm font-medium ${completed ? 'text-slate-500 line-through dark:text-slate-400' : 'text-slate-900 dark:text-white'}`}>
           {task.title}
         </p>
         {task.description && (
@@ -47,6 +48,7 @@ export default function TaskItem({ task, onStatusChange, onDelete, updating = fa
           {showDocument && documentId && (
             <Link
               to={`/documents/${documentId}`}
+              state={{ from: location.pathname }}
               className="inline-flex min-w-0 items-center gap-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
               title={documentName}
             >

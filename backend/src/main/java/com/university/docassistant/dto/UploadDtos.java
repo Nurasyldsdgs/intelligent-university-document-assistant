@@ -10,13 +10,17 @@ public final class UploadDtos {
     private UploadDtos() {
     }
 
-    /** {@code aiClassified} is true when the category was chosen by the AI classifier rather than by the uploader. */
+    /**
+     * {@code aiClassified} is always false now: the AI classifies in the background after the upload has answered
+     * (see DocumentResponse.aiStatus and GET /documents/{id}/status). Kept so existing clients keep working.
+     */
     public record UploadedDocument(DocumentResponse document, boolean aiClassified) {
     }
 
     public record SkippedFile(String fileName, String reason) {
     }
 
-    public record BatchUploadResponse(List<UploadedDocument> uploaded, List<SkippedFile> skipped) {
+    /** {@code batchImportId} is the BatchImport row of a ZIP upload; null for the multi-file upload. */
+    public record BatchUploadResponse(List<UploadedDocument> uploaded, List<SkippedFile> skipped, Long batchImportId) {
     }
 }

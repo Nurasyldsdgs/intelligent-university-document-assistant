@@ -211,7 +211,11 @@ public class CourseService {
         }
     }
 
-    /** Removes a student from the course with their tasks of it; for the student themselves, the teacher or ADMIN. */
+    /**
+     * Removes a student from the course; for the student themselves, the teacher or ADMIN. Their tasks and submissions
+     * are kept (the teacher and ADMIN still read them); the student just loses access to the course and its tasks.
+     * Enrolling again gives back the same tasks: fanOut only adds the ones they do not have.
+     */
     @Transactional
     public void unenroll(Long courseId, Long studentId, String email) {
         User user = access.currentUser(email);
@@ -221,7 +225,6 @@ public class CourseService {
             throw ApiException.notFound(ErrorCodes.COURSE_NOT_FOUND, "Course not found");
         }
         if (enrollmentRepository.unenroll(courseId, studentId) > 0) {
-            taskRepository.deleteByCourseIdAndUserId(courseId, studentId);
             auditService.record(user.getEmail(), AuditService.STUDENT_UNENROLLED,
                     "Student " + studentId + " from course " + courseId);
             log.info("User {} removed student {} from course {}", user.getEmail(), studentId, courseId);

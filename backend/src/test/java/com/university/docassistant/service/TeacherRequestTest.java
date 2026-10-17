@@ -173,6 +173,6 @@ class TeacherRequestTest {
     private AdminService adminService() {
         return new AdminService(users, mock(DocumentRepository.class), mock(CourseRepository.class), tasks,
                 mock(TaskSubmissionRepository.class), mock(AssignmentRepository.class), enrollments,
-                mock(AuditLogRepository.class), audit, mock(StorageService.class));
+                mock(AuditLogRepository.class), audit, mock(StorageService.class), mock(AssignmentService.class));
     }
 }

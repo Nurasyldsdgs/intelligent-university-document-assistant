@@ -7,6 +7,13 @@ import CategoryBadge from './CategoryBadge'
  * the AI chose it.
  */
 export default function DocumentAiBadge({ doc }) {
+  if (doc.ocrStatus === 'PENDING' || doc.ocrStatus === 'RUNNING') {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-sky-700 dark:text-sky-300" title="Текст скана распознаётся; это может занять до пары минут">
+        <Loader2 className="h-3 w-3 animate-spin" /> Распознаём скан…
+      </span>
+    )
+  }
   if (doc.aiStatus === 'PENDING' || doc.aiStatus === 'PROCESSING') {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-violet-700 dark:text-violet-300" title="Студенты увидят документ после классификации">

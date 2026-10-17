@@ -9,13 +9,17 @@ const CLASSIFY_TIMEOUT_MS = 3 * 60 * 1000
 const DEADLINES_TIMEOUT_MS = 60 * 1000
 const MAX_IDS_PER_REQUEST = 50 // DocumentService.MAX_STATUS_IDS
 const IN_PROGRESS = new Set(['PENDING', 'PROCESSING'])
+// US-07: OCR of a scan runs before (or instead of) the classification.
+const OCR_IN_PROGRESS = new Set(['PENDING', 'RUNNING'])
+const working = (status) => IN_PROGRESS.has(status.aiStatus) || OCR_IN_PROGRESS.has(status.ocrStatus)
 
 /**
- * Phase of a document before any poll: 'classifying' while the AI has not decided, 'deadlines' for a
+ * Phase of a document before any poll: 'classifying' while the AI has not decided (or its scan is still being
+ * recognized), 'deadlines' for a
  * SYLLABUS/ASSIGNMENT whose deadline analysis is still to come (a manual category), 'finished' otherwise.
  */
 export function initialPhase(document, watchDeadlines = true) {
-  if (IN_PROGRESS.has(document.aiStatus)) return 'classifying'
+  if (working(document)) return 'classifying'
   if (watchDeadlines && document.aiStatus === 'MANUAL' && watchesDeadlines(document.category, document.hasExtractedText)) {
     return 'deadlines'
   }
@@ -86,8 +90,12 @@ export default function useDocumentStatus(documents, { deadlines = true } = {}) 
       active.forEach(([id, item]) => {
         const data = byId.get(id)
         if (data) {
-          if (item.phase === 'classifying' && !IN_PROGRESS.has(data.aiStatus)) {
-            if (deadlines && data.aiStatus === 'DONE' && watchesDeadlines(data.category, item.hasText)) {
+          if (item.phase === 'classifying' && !working(data)) {
+            // A recognized scan has text now, whatever the upload found; a category chosen by hand also gets its
+            // deadline analysis after the OCR.
+            const hasText = item.hasText || data.textFromOcr
+            if (deadlines && (data.aiStatus === 'DONE' || (data.aiStatus === 'MANUAL' && data.textFromOcr))
+              && watchesDeadlines(data.category, hasText)) {
               item.phase = 'deadlines'
               item.watchedDeadlines = true
               item.deadlinesSince = now

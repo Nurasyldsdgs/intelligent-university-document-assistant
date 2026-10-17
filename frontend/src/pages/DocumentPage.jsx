@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Download, Eye, GraduationCap, Loader2, LockKeyhole, MessageSquareText, RefreshCw, ShieldAlert, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowLeft, Download, Eye, FileText, GraduationCap, Loader2, LockKeyhole, MessageSquareText, RefreshCw, ShieldAlert, Sparkles, Trash2 } from 'lucide-react'
 import api, { describeError, getBlobErrorMessage } from '../api/axios'
 import { useToast } from '../context/ToastContext'
 import useConfirm from '../hooks/useConfirm'
@@ -12,6 +12,11 @@ import DocumentAiBadge from '../components/DocumentAiBadge'
 import ReclassifyButton from '../components/ReclassifyButton'
 import { VISIBILITY_LABELS } from '../constants/documents'
 import { canDeleteDocument, formatSize, getFileFormat } from '../utils/fileTypes'
+import { isOriginalRestricted } from '../utils/privacy'
+import DocumentTextPanel from '../components/DocumentTextPanel'
+import PiiBadge from '../components/PiiBadge'
+import SetCategoryDialog from '../components/SetCategoryDialog'
+import OcrBadge from '../components/OcrBadge'
 import { formatDateTime } from '../utils/dates'
 import { safeInternalPath } from '../utils/postLoginRedirect'
 import useDocumentStatus from '../hooks/useDocumentStatus'
@@ -19,6 +24,7 @@ import { isClassifying, withLiveStatus } from '../utils/documentStatus'
 
 const TABS = [
   { id: 'preview', label: 'Просмотр', icon: Eye },
+  { id: 'text', label: 'Текст', icon: FileText },
   { id: 'analysis', label: 'Анализ ИИ и задачи', icon: Sparkles },
   { id: 'chat', label: 'Чат с ИИ', icon: MessageSquareText },
 ]
@@ -41,6 +47,7 @@ export default function DocumentPage() {
   const [confirm, confirmDialog] = useConfirm()
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = TABS.some((item) => item.id === searchParams.get('tab')) ? searchParams.get('tab') : 'preview'
+  const openTab = (tabId) => setSearchParams(tabId === 'preview' ? {} : { tab: tabId }, { replace: true, state: location.state })
 
   const [doc, setDoc] = useState(null)
   const [error, setError] = useState(null) // { status, message }
@@ -134,7 +141,7 @@ export default function DocumentPage() {
                   type="button"
                   role="tab"
                   aria-selected={tab === tabId}
-                  onClick={() => setSearchParams(tabId === 'preview' ? {} : { tab: tabId }, { replace: true, state: location.state })}
+                  onClick={() => openTab(tabId)}
                   className={`flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition ${
                     tab === tabId
                       ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-sm'
@@ -147,7 +154,8 @@ export default function DocumentPage() {
             </div>
 
             <div className="mt-5" role="tabpanel">
-              {tab === 'preview' && <DocumentPreview doc={liveDoc} />}
+              {tab === 'preview' && <DocumentPreview doc={liveDoc} onShowText={() => openTab('text')} />}
+              {tab === 'text' && <DocumentTextPanel doc={liveDoc} />}
               {tab === 'analysis' && <AnalysisPanel doc={liveDoc} />}
               {tab === 'chat' && <DocumentChat doc={liveDoc} />}
             </div>
@@ -191,7 +199,11 @@ function DocumentHeader({ doc, busy, onDownload, onDelete, onUpdated }) {
               Текст не распознан
             </span>
           )}
+          <PiiBadge doc={doc} size="large" />
+          <OcrBadge doc={doc} size="large" />
         </div>
+        {doc.ocrStatus === 'FAILED' && canDeleteDocument(doc) && <OcrReview doc={doc} onUpdated={onUpdated} />}
+        {doc.piiCount > 0 && canDeleteDocument(doc) && <OriginalAccess doc={doc} onUpdated={onUpdated} />}
       </div>
       <div className="flex shrink-0 flex-wrap gap-2">
         {canDeleteDocument(doc) && <ReclassifyButton doc={doc} onUpdated={onUpdated} size="large" />}
@@ -205,16 +217,133 @@ function DocumentHeader({ doc, busy, onDownload, onDelete, onUpdated }) {
             <Trash2 className="h-4 w-4" /> Удалить
           </button>
         )}
-        <button
-          type="button"
-          onClick={onDownload}
-          disabled={busy}
-          className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-slate-700 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-60"
-        >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Скачать
-        </button>
+        {isOriginalRestricted(doc) ? (
+          <span className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-3.5 py-2 text-sm text-slate-600 dark:text-slate-300">
+            <LockKeyhole className="h-4 w-4" aria-hidden="true" /> Оригинал доступен только преподавателю
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={onDownload}
+            disabled={busy}
+            className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-slate-700 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-60"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Скачать
+          </button>
+        )}
       </div>
     </section>
+  )
+}
+
+/**
+ * Course teacher / ADMIN, when the scan's text could not be recognized ("Нужна проверка"): set the type by hand, or
+ * run the recognition again (the processing job is queued anew; the page then follows its progress).
+ */
+function OcrReview({ doc, onUpdated }) {
+  const { notifyError, showSuccess } = useToast()
+  const [choosing, setChoosing] = useState(false)
+  const [retrying, setRetrying] = useState(false)
+
+  const retry = async () => {
+    setRetrying(true)
+    try {
+      const { data } = await api.post(`/documents/${doc.id}/ocr/retry`)
+      onUpdated(data)
+      showSuccess('Скан поставлен на повторное распознавание')
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setRetrying(false)
+    }
+  }
+
+  const action = 'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-medium transition disabled:opacity-60'
+  return (
+    <div className="mt-3 rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2.5 text-xs text-amber-900 dark:text-amber-200">
+      <p className="font-semibold">Нужна проверка: текст скана распознать не удалось.</p>
+      <p className="mt-0.5">Укажите тип документа сами или запустите распознавание ещё раз.</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setChoosing(true)}
+          disabled={retrying}
+          className={`${action} border-amber-300 dark:border-amber-500/40 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 hover:bg-amber-100/60 dark:hover:bg-slate-800`}
+        >
+          Указать тип вручную
+        </button>
+        <button
+          type="button"
+          onClick={retry}
+          disabled={retrying}
+          className={`${action} border-amber-300 dark:border-amber-500/40 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 hover:bg-amber-100/60 dark:hover:bg-slate-800`}
+        >
+          {retrying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          Повторить распознавание
+        </button>
+      </div>
+      {choosing && <SetCategoryDialog doc={doc} onClose={() => setChoosing(false)} onSaved={onUpdated} />}
+    </div>
+  )
+}
+
+/**
+ * Course teacher / ADMIN: the "Разрешить студентам оригинал" switch. Either change is confirmed first; allowing it
+ * makes every opening of the file by a student an entry in the system log.
+ */
+function OriginalAccess({ doc, onUpdated }) {
+  const { notifyError, showSuccess } = useToast()
+  const [confirm, confirmDialog] = useConfirm()
+  const [saving, setSaving] = useState(false)
+  const allowed = doc.originalAllowedForStudents
+
+  const toggle = async () => {
+    const confirmed = await confirm(allowed ? {
+      title: 'Закрыть оригинал для студентов?',
+      message: 'Студенты снова будут видеть только текст, в котором личные данные скрыты.',
+      confirmLabel: 'Закрыть',
+      tone: 'primary',
+    } : {
+      title: 'Разрешить студентам оригинал?',
+      message: 'Студенты курса смогут открыть и скачать файл вместе с личными данными. Каждое открытие попадёт в журнал.',
+      confirmLabel: 'Разрешить',
+      tone: 'primary',
+    })
+    if (!confirmed) return
+    setSaving(true)
+    try {
+      const { data } = await api.post(`/documents/${doc.id}/${allowed ? 'deny-original' : 'allow-original'}`)
+      onUpdated({ originalAllowedForStudents: data.originalAllowedForStudents })
+      showSuccess(data.originalAllowedForStudents ? 'Студенты могут открыть оригинал' : 'Студентам снова доступен только текст без личных данных')
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={allowed}
+        onClick={toggle}
+        disabled={saving}
+        className="inline-flex items-center gap-2 rounded-lg font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-60"
+      >
+        <span
+          aria-hidden="true"
+          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition ${allowed ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-600'}`}
+        >
+          <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition ${allowed ? 'translate-x-4' : 'translate-x-0.5'}`} />
+        </span>
+        Разрешить студентам оригинал
+        {saving && <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />}
+      </button>
+      <span>{allowed ? 'Студенты могут открыть файл; каждое открытие записывается в журнал.' : 'Студенты видят только текст со скрытыми личными данными.'}</span>
+      {confirmDialog}
+    </div>
   )
 }
 

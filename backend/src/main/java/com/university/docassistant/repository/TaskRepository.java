@@ -13,22 +13,42 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 /**
  * List methods return {@link TaskResponse} rows built in the query; see {@link TaskResponse#SELECT}.
  * A student's tasks are copies of the ACTIVE assignments of the courses they are enrolled in: {@link #fanOut} creates
  * the missing ones and {@link #syncWithAssignments} carries over edited titles and deadlines; statuses are kept.
+ * Tasks are never deleted while they carry student work (a status other than PENDING or a submission, see
+ * {@link #ACTIVITY}): a student who leaves a course keeps them (hidden from their lists until they re-enroll, see
+ * {@link #ENROLLED}), and assignments with such tasks are closed instead of deleted (AssignmentService).
  */
 @Repository
 public interface TaskRepository extends JpaRepository<Task, Long> {
 
-    @Query(value = TaskResponse.SELECT + "WHERE t.user.id = :userId",
-            countQuery = "SELECT COUNT(t) FROM Task t WHERE t.user.id = :userId")
+    /** JPQL condition on Task t: the student did something with it (changed its status or handed in a file). */
+    String ACTIVITY = """
+            (t.status <> com.university.docassistant.entity.TaskStatus.PENDING
+             OR EXISTS (SELECT s.id FROM TaskSubmission s WHERE s.task = t))
+            """;
+
+    /**
+     * JPQL condition on Task t, for the student's own lists: no course, or its owner is still enrolled in it; and never
+     * a task of a DRAFT assignment (fanOut does not create those; this keeps it so if one ever existed).
+     */
+    String ENROLLED = """
+            (t.course IS NULL OR EXISTS (SELECT e.enrolledAt FROM Enrollment e
+                                         WHERE e.course = t.course AND e.student = t.user))
+            AND (t.assignment IS NULL OR t.assignment.status <> com.university.docassistant.entity.AssignmentStatus.DRAFT)
+            """;
+
+    @Query(value = TaskResponse.SELECT + "WHERE t.user.id = :userId AND " + ENROLLED,
+            countQuery = "SELECT COUNT(t) FROM Task t WHERE t.user.id = :userId AND " + ENROLLED)
     Page<TaskResponse> findViewsByUserId(@Param("userId") Long userId, Pageable pageable);
 
-    @Query(value = TaskResponse.SELECT + "WHERE t.user.id = :userId AND t.status = :status",
-            countQuery = "SELECT COUNT(t) FROM Task t WHERE t.user.id = :userId AND t.status = :status")
+    @Query(value = TaskResponse.SELECT + "WHERE t.user.id = :userId AND t.status = :status AND " + ENROLLED,
+            countQuery = "SELECT COUNT(t) FROM Task t WHERE t.user.id = :userId AND t.status = :status AND " + ENROLLED)
     Page<TaskResponse> findViewsByUserIdAndStatus(@Param("userId") Long userId,
                                                   @Param("status") TaskStatus status,
                                                   Pageable pageable);
@@ -36,14 +56,13 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     /** Not completed, deadline from {@code from} on, nearest first: the "Upcoming deadlines" widget. */
     @Query(value = TaskResponse.SELECT + """
             WHERE t.user.id = :userId AND t.status <> com.university.docassistant.entity.TaskStatus.COMPLETED
-              AND t.deadline >= :from
+              AND t.deadline >= :from AND """ + ENROLLED + """
             ORDER BY t.deadline
             """,
             countQuery = """
             SELECT COUNT(t) FROM Task t
             WHERE t.user.id = :userId AND t.status <> com.university.docassistant.entity.TaskStatus.COMPLETED
-              AND t.deadline >= :from
-            """)
+              AND t.deadline >= :from AND """ + ENROLLED)
     Page<TaskResponse> findUpcomingViews(@Param("userId") Long userId,
                                          @Param("from") LocalDateTime from,
                                          Pageable pageable);
@@ -97,6 +116,20 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     @Query("DELETE FROM Task t WHERE t.assignment.id IN :assignmentIds")
     int deleteByAssignmentIdIn(@Param("assignmentIds") Collection<Long> assignmentIds);
 
+    /** Which of the assignments have a task with student work; those must be closed, never deleted. */
+    @Query("SELECT DISTINCT t.assignment.id FROM Task t WHERE t.assignment.id IN :assignmentIds AND " + ACTIVITY)
+    List<Long> findAssignmentIdsWithActivity(@Param("assignmentIds") Collection<Long> assignmentIds);
+
+    /** The tasks of kept assignments lose the link to a document that is being deleted. */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE Task t SET t.document = NULL WHERE t.assignment.id IN :assignmentIds")
+    int detachDocumentFromAssignmentTasks(@Param("assignmentIds") Collection<Long> assignmentIds);
+
+    /** Tasks with student work (also old ones without an assignment) survive the deletion of their documents. */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE Task t SET t.document = NULL WHERE t.document.id IN :documentIds AND " + ACTIVITY)
+    int detachDocumentFromTasksWithActivity(@Param("documentIds") Collection<Long> documentIds);
+
     @Modifying
     @Query("DELETE FROM Task t WHERE t.assignment.id IN (SELECT a.id FROM Assignment a WHERE a.sourceDocument.id = :documentId)")
     int deleteByAssignmentSourceDocumentId(@Param("documentId") Long documentId);
@@ -108,7 +141,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
             """)
     int deleteByAssignmentSourceDocumentOwnerId(@Param("ownerId") Long ownerId);
 
-    /** A student leaving a course loses that course's tasks. */
+    /** Not used on unenroll any more: a student who leaves keeps their tasks and submissions (see {@link #ENROLLED}). */
     @Modifying
     @Query("DELETE FROM Task t WHERE t.course.id = :courseId AND t.user.id = :userId")
     int deleteByCourseIdAndUserId(@Param("courseId") Long courseId, @Param("userId") Long userId);

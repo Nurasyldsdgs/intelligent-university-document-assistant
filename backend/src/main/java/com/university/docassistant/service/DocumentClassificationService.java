@@ -63,15 +63,21 @@ public class DocumentClassificationService {
     private final DocumentClassificationRepository classificationRepository;
     private final DocumentRepository documentRepository;
     private final ObjectMapper objectMapper;
+    private final DocumentPrivacyService privacyService;
 
     public boolean isAvailable() {
         return aiClient.isConfigured();
     }
 
+    /**
+     * @param text the document's masked text (documents.masked_text): personal data never goes to the AI. The file
+     *             name is masked here, since it is sent along.
+     */
     public Optional<ClassificationResult> classify(String fileName, String text) {
         if (!aiClient.isConfigured()) {
             return Optional.empty();
         }
+        fileName = privacyService.maskFileName(fileName);
         String sample = text == null ? "" : text.strip();
         if (sample.length() > SAMPLE_LENGTH) {
             sample = sample.substring(0, SAMPLE_LENGTH);
@@ -99,6 +105,11 @@ public class DocumentClassificationService {
         row.setConfidenceScore(result.confidence());
         row.setClassifiedAt(LocalDateTime.now());
         classificationRepository.save(row);
+    }
+
+    /** Forgets the AI result of a document whose category the teacher has now chosen by hand. */
+    public void clearResult(Long documentId) {
+        classificationRepository.findByDocumentId(documentId).ifPresent(classificationRepository::delete);
     }
 
     /** The stored AI result of one document, if the AI classified it. */

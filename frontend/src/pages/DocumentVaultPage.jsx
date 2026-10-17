@@ -13,9 +13,12 @@ import ErrorState from '../components/ErrorState'
 import useDocumentStatus from '../hooks/useDocumentStatus'
 import { isClassifying, withLiveStatus } from '../utils/documentStatus'
 import DocumentAiBadge from '../components/DocumentAiBadge'
+import PiiBadge from '../components/PiiBadge'
+import OcrBadge from '../components/OcrBadge'
 import ReclassifyButton from '../components/ReclassifyButton'
 import { canDeleteDocument, formatSize, getFileFormat } from '../utils/fileTypes'
 import { formatDateTime } from '../utils/dates'
+import { isOriginalRestricted } from '../utils/privacy'
 
 const PAGE_SIZE = 20
 
@@ -247,6 +250,8 @@ function DocumentRow({ doc, busy, onDownload, onDelete, onUpdated }) {
             <span className="mt-1 flex flex-wrap items-center gap-1">
               <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset ${format.badge}`}>{format.label}</span>
               <DocumentAiBadge doc={doc} />
+              <PiiBadge doc={doc} />
+              <OcrBadge doc={doc} />
               {doc.courseCode && (
                 <span className="inline-flex items-center gap-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
                   <GraduationCap className="h-2.5 w-2.5" /> {doc.courseCode}
@@ -278,9 +283,11 @@ function DocumentRow({ doc, busy, onDownload, onDelete, onUpdated }) {
               <MessageSquareText className="h-3.5 w-3.5" /> Чат с ИИ
             </Link>
           )}
-          <button type="button" onClick={() => onDownload(doc)} disabled={busy} className={`${actionClass} border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800`}>
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Скачать
-          </button>
+          {!isOriginalRestricted(doc) && (
+            <button type="button" onClick={() => onDownload(doc)} disabled={busy} className={`${actionClass} border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800`}>
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Скачать
+            </button>
+          )}
           {canDeleteDocument(doc) && (
             <ReclassifyButton doc={doc} onUpdated={(changes) => onUpdated(doc.id, changes)} />
           )}
@@ -313,6 +320,8 @@ function DocumentCard({ doc, busy, onDownload, onDelete, onUpdated }) {
           <span className="mt-1 flex flex-wrap items-center gap-1">
             <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset ${format.badge}`}>{format.label}</span>
             <DocumentAiBadge doc={doc} />
+            <PiiBadge doc={doc} />
+            <OcrBadge doc={doc} />
             {doc.courseCode && (
               <span className="inline-flex items-center gap-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
                 <GraduationCap className="h-2.5 w-2.5" /> {doc.courseCode}
@@ -330,9 +339,11 @@ function DocumentCard({ doc, busy, onDownload, onDelete, onUpdated }) {
             <MessageSquareText className="h-4 w-4" />
           </Link>
         )}
-        <button type="button" onClick={() => onDownload(doc)} disabled={busy} aria-label="Скачать" title="Скачать" className={`${iconActionClass} border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800`}>
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-        </button>
+        {!isOriginalRestricted(doc) && (
+          <button type="button" onClick={() => onDownload(doc)} disabled={busy} aria-label="Скачать" title="Скачать" className={`${iconActionClass} border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800`}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          </button>
+        )}
         {canDeleteDocument(doc) && (
           <ReclassifyButton doc={doc} onUpdated={(changes) => onUpdated(doc.id, changes)} compact />
         )}

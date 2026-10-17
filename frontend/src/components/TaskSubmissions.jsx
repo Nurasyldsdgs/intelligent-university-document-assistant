@@ -16,9 +16,10 @@ const extensionOf = (name) => name.split('.').pop().toLowerCase()
 /**
  * Submissions of a task (Moodle-style). With {@code taskId} it is the student's own task: files are dropped or picked
  * here and handed in with POST /tasks/{id}/submissions - the only upload a student can make. With
- * {@code assignmentId} it is the course teacher's read-only view of every student's submissions.
+ * {@code assignmentId} it is the course teacher's read-only view of every student's submissions. With {@code closed}
+ * (the assignment is closed) the student can still see what they handed in, but not hand in more.
  */
-export default function TaskSubmissions({ taskId, assignmentId, count = 0 }) {
+export default function TaskSubmissions({ taskId, assignmentId, count = 0, closed = false }) {
   const { notifyError, showError, showSuccess } = useToast()
   const inputRef = useRef(null)
   const [open, setOpen] = useState(false)
@@ -97,7 +98,7 @@ export default function TaskSubmissions({ taskId, assignmentId, count = 0 }) {
           {own ? 'Моё решение' : 'Решения студентов'}{total !== null && `: ${total}`}
           <ChevronDown className={`h-3 w-3 transition ${open ? 'rotate-180' : ''}`} />
         </button>
-        {own && (
+        {own && !closed && (
           <>
             <input
               ref={inputRef}

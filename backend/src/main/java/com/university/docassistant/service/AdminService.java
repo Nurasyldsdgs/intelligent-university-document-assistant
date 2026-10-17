@@ -48,6 +48,7 @@ public class AdminService {
     private final AuditLogRepository auditLogRepository;
     private final AuditService auditService;
     private final StorageService storageService;
+    private final AssignmentService assignmentService;
 
     /**
      * Users by id, a page at a time. {@code query} (2+ characters, case-insensitive) matches email or name;
@@ -159,6 +160,8 @@ public class AdminService {
         storedFileNames.addAll(submissionRepository.findStoredFileNamesByStudentId(userId));
 
         taskRepository.deleteByUserId(userId);
+        // Other students' work on assignments from this user's documents is kept (closed), never deleted.
+        assignmentService.releaseDocuments(documentRepository.findIdsByOwnerId(userId), adminEmail);
         taskRepository.deleteByAssignmentSourceDocumentOwnerId(userId);
         assignmentRepository.deleteBySourceDocumentOwnerId(userId);
         taskRepository.deleteByDocumentOwnerId(userId);

@@ -1,7 +1,9 @@
 package com.university.docassistant.service;
 
+import com.university.docassistant.config.PrivacyProperties;
 import com.university.docassistant.dto.DocumentStatusItem;
 import com.university.docassistant.entity.AiStatus;
+import com.university.docassistant.entity.AssignmentStatus;
 import com.university.docassistant.entity.DocumentCategory;
 import com.university.docassistant.entity.DocumentVisibility;
 import com.university.docassistant.entity.Role;
@@ -50,15 +52,16 @@ class DocumentStatusBatchTest {
             access, mock(StorageService.class), mock(DocumentParserService.class), mock(DocumentAnalysisService.class),
             mock(AiClientService.class), mock(DocumentChunkService.class), mock(AuditService.class),
             mock(DocumentClassificationService.class), mock(DocumentProcessingService.class),
-            mock(BatchImportRepository.class));
+            mock(BatchImportRepository.class), mock(AssignmentService.class),
+            new DocumentPrivacyService(new PrivacyProperties(null, null)));
 
     // Course 10: a classified syllabus (1), a document still being classified (2), a teacher note (3).
     // Course 20: someone else's course (4). Id 99 does not exist.
     private final List<StatusRow> rows = List.of(
-            new StatusRow(1L, 10L, DocumentVisibility.COURSE_STUDENTS, AiStatus.DONE, DocumentCategory.SYLLABUS, 0.96),
-            new StatusRow(2L, 10L, DocumentVisibility.COURSE_STUDENTS, AiStatus.PENDING, DocumentCategory.OTHER, null),
-            new StatusRow(3L, 10L, DocumentVisibility.TEACHER_ONLY, AiStatus.MANUAL, DocumentCategory.LECTURE, 0.5),
-            new StatusRow(4L, 20L, DocumentVisibility.COURSE_STUDENTS, AiStatus.DONE, DocumentCategory.LECTURE, 0.8));
+            new StatusRow(1L, 10L, DocumentVisibility.COURSE_STUDENTS, AiStatus.DONE, DocumentCategory.SYLLABUS, 0.96, null, false),
+            new StatusRow(2L, 10L, DocumentVisibility.COURSE_STUDENTS, AiStatus.PENDING, DocumentCategory.OTHER, null, null, false),
+            new StatusRow(3L, 10L, DocumentVisibility.TEACHER_ONLY, AiStatus.MANUAL, DocumentCategory.LECTURE, 0.5, null, false),
+            new StatusRow(4L, 20L, DocumentVisibility.COURSE_STUDENTS, AiStatus.DONE, DocumentCategory.LECTURE, 0.8, null, false));
 
     @BeforeEach
     void setUp() {
@@ -70,8 +73,9 @@ class DocumentStatusBatchTest {
         when(courses.findAllIds()).thenReturn(List.of(10L, 20L));
         when(documents.findStatusRows(anyCollection())).thenReturn(rows);
         List<Object[]> counts = new ArrayList<>();
-        counts.add(new Object[]{1L, 3L});
-        when(assignments.countBySourceDocumentIds(anyCollection())).thenReturn(counts);
+        counts.add(new Object[]{1L, AssignmentStatus.ACTIVE, 3L});
+        counts.add(new Object[]{1L, AssignmentStatus.DRAFT, 2L}); // AI drafts: only the course's teacher/ADMIN learn of them.
+        when(assignments.countByStatusForSourceDocumentIds(anyCollection())).thenReturn(counts);
     }
 
     @Test
@@ -83,8 +87,9 @@ class DocumentStatusBatchTest {
         assertThat(syllabus.aiStatus()).isEqualTo(AiStatus.DONE);
         assertThat(syllabus.aiConfidence()).isEqualTo(0.96);
         assertThat(syllabus.assignmentsCount()).isEqualTo(3);
+        assertThat(syllabus.draftsCount()).isZero();
         // The count query only asks about what the user may see.
-        verify(assignments).countBySourceDocumentIds(List.of(1L));
+        verify(assignments).countByStatusForSourceDocumentIds(List.of(1L));
     }
 
     @Test
@@ -97,6 +102,8 @@ class DocumentStatusBatchTest {
         assertThat(result.get(1).aiConfidence()).isNull();
         assertThat(result.get(2).aiConfidence()).isNull();
         assertThat(result.get(1).assignmentsCount()).isZero();
+        assertThat(result.get(0).assignmentsCount()).isEqualTo(5);
+        assertThat(result.get(0).draftsCount()).isEqualTo(2);
     }
 
     @Test

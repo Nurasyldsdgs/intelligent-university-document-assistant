@@ -1,5 +1,6 @@
 package com.university.docassistant.dto;
 
+import com.university.docassistant.entity.AssignmentStatus;
 import com.university.docassistant.entity.TaskStatus;
 
 import java.time.LocalDateTime;
@@ -20,6 +21,8 @@ public record TaskResponse(
         String courseTitle,
         String courseCode,
         Long assignmentId,
+        /** CLOSED: the assignment takes no more submissions; null for tasks without an assignment. */
+        AssignmentStatus assignmentStatus,
         /** Files the student has handed in for this task. */
         Long submissionCount
 ) {
@@ -27,7 +30,7 @@ public record TaskResponse(
     public static final String SELECT = """
             SELECT new com.university.docassistant.dto.TaskResponse(
                 t.id, t.title, t.description, t.deadline, t.status,
-                d.id, d.originalFileName, c.id, c.title, c.code, a.id,
+                d.id, d.originalFileName, c.id, c.title, c.code, a.id, a.status,
                 (SELECT COUNT(s) FROM TaskSubmission s WHERE s.task.id = t.id))
             FROM Task t LEFT JOIN t.document d LEFT JOIN t.course c LEFT JOIN t.assignment a
             """;

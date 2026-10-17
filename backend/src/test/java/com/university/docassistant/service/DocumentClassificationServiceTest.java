@@ -1,5 +1,6 @@
 package com.university.docassistant.service;
 
+import com.university.docassistant.config.PrivacyProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.university.docassistant.entity.Document;
 import com.university.docassistant.entity.DocumentCategory;
@@ -26,7 +27,7 @@ class DocumentClassificationServiceTest {
     private final DocumentClassificationRepository classifications = mock(DocumentClassificationRepository.class);
     private final DocumentRepository documents = mock(DocumentRepository.class);
     private final DocumentClassificationService service = new DocumentClassificationService(ai, classifications,
-            documents, new ObjectMapper());
+            documents, new ObjectMapper(), new DocumentPrivacyService(new PrivacyProperties(null, null)));
 
     @Test
     void parsesTheTypeOutOfTheAnswer() {

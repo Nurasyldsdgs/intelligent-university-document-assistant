@@ -10,6 +10,7 @@ import { formatSize } from '../utils/fileTypes'
 import useDocumentStatus, { initialPhase } from '../hooks/useDocumentStatus'
 import CategoryBadge from './CategoryBadge'
 import SearchSelect from './SearchSelect'
+import { countAssignments } from '../utils/plural'
 
 // Must match DocumentService.MAX_DOCUMENT_BYTES and spring.servlet.multipart on the backend.
 const MAX_FILE_SIZE = 20 * 1024 * 1024
@@ -319,7 +320,7 @@ export default function DocumentUpload({ course, onUploaded }) {
           result={result}
           viewOf={viewOf}
           deadlineNotices={deadlineNotices}
-          assignmentsLink={(document) => (course ? '#assignments' : `/courses/${document.courseId}#assignments`)}
+          assignmentsLink={(document, anchor = 'assignments') => (course ? `#${anchor}` : `/courses/${document.courseId}#${anchor}`)}
           onClose={() => setResult(null)}
         />
       )}
@@ -374,8 +375,19 @@ function UploadResult({ result, viewOf, deadlineNotices, assignmentsLink, onClos
           {deadlineNotices.map(({ document, view }) => (
             <li key={document.id} className="flex flex-wrap items-center gap-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 px-2 py-1.5 text-xs text-emerald-800 dark:text-emerald-300">
               <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-              <span className="min-w-0">ИИ создал дедлайнов: {view.assignmentsCount} — «{document.originalFileName}»</span>
-              <AssignmentsLink to={assignmentsLink(document)} />
+              {view.draftsCount > 0 ? (
+                <>
+                  <span className="min-w-0">
+                    ИИ нашёл {countAssignments(view.draftsCount)} — проверьте и опубликуйте («{document.originalFileName}»)
+                  </span>
+                  <AssignmentsLink to={assignmentsLink(document, 'drafts')} label="К черновикам" />
+                </>
+              ) : (
+                <>
+                  <span className="min-w-0">ИИ создал дедлайнов: {view.assignmentsCount} — «{document.originalFileName}»</span>
+                  <AssignmentsLink to={assignmentsLink(document)} />
+                </>
+              )}
             </li>
           ))}
         </ul>
@@ -410,6 +422,13 @@ function DocumentStatus({ view }) {
     return <span className={`${muted} text-slate-500 dark:text-slate-400`}>Обработка продолжается в фоне</span>
   }
   if (view.phase === 'classifying') {
+    if (view.ocrStatus === 'PENDING' || view.ocrStatus === 'RUNNING') {
+      return (
+        <span className={`${muted} text-sky-700 dark:text-sky-300`}>
+          <Loader2 className="h-3 w-3 animate-spin" /> Распознаём скан…
+        </span>
+      )
+    }
     if (view.aiStatus === 'PROCESSING') {
       return (
         <span className={`${muted} text-violet-700 dark:text-violet-300`}>
@@ -439,11 +458,11 @@ function DocumentStatus({ view }) {
 }
 
 /** In-page anchor on the course page, a route link elsewhere (the vault). */
-function AssignmentsLink({ to }) {
+function AssignmentsLink({ to, label = 'К заданиям курса' }) {
   const className = 'font-semibold underline-offset-2 hover:underline'
   return to.startsWith('#')
-    ? <a href={to} className={className}>К заданиям курса</a>
-    : <Link to={to} className={className}>К заданиям курса</Link>
+    ? <a href={to} className={className}>{label}</a>
+    : <Link to={to} className={className}>{label}</Link>
 }
 
 function Field({ label, htmlFor, children }) {

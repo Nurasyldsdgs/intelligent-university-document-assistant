@@ -2,6 +2,7 @@ package com.university.docassistant.repository;
 
 import com.university.docassistant.dto.AssignmentDtos.AssignmentResponse;
 import com.university.docassistant.entity.Assignment;
+import com.university.docassistant.entity.AssignmentStatus;
 import java.util.Collection;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -11,29 +12,54 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 /**
  * Deleting assignments does not touch the students' tasks: callers remove those first with the matching
- * TaskRepository method.
+ * TaskRepository method. Assignments whose tasks carry student work are closed instead (AssignmentService).
  */
 @Repository
 public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
 
-    @Query(value = AssignmentResponse.SELECT + "WHERE c.id = :courseId",
-            countQuery = "SELECT COUNT(a) FROM Assignment a WHERE a.course.id = :courseId")
+    /** JPQL condition on Assignment a: published (ACTIVE or CLOSED). DRAFTs are listed only by {@link #findDraftViewsByCourseId}. */
+    String PUBLISHED = "a.status <> " + "com.university.docassistant.entity.AssignmentStatus.DRAFT";
+
+    @Query(value = AssignmentResponse.SELECT + "WHERE c.id = :courseId AND " + PUBLISHED,
+            countQuery = "SELECT COUNT(a) FROM Assignment a WHERE a.course.id = :courseId AND " + PUBLISHED)
     Page<AssignmentResponse> findViewsByCourseId(@Param("courseId") Long courseId, Pageable pageable);
 
-    @Query(value = AssignmentResponse.SELECT + "WHERE d.id = :documentId",
-            countQuery = "SELECT COUNT(a) FROM Assignment a WHERE a.sourceDocument.id = :documentId")
+    @Query(value = AssignmentResponse.SELECT + "WHERE d.id = :documentId AND " + PUBLISHED,
+            countQuery = "SELECT COUNT(a) FROM Assignment a WHERE a.sourceDocument.id = :documentId AND " + PUBLISHED)
     Page<AssignmentResponse> findViewsBySourceDocumentId(@Param("documentId") Long documentId, Pageable pageable);
+
+    /** The AI drafts of a course waiting for review; for its teacher and ADMIN only. */
+    @Query(value = AssignmentResponse.SELECT + "WHERE c.id = :courseId AND a.status = com.university.docassistant.entity.AssignmentStatus.DRAFT",
+            countQuery = "SELECT COUNT(a) FROM Assignment a WHERE a.course.id = :courseId AND a.status = com.university.docassistant.entity.AssignmentStatus.DRAFT")
+    Page<AssignmentResponse> findDraftViewsByCourseId(@Param("courseId") Long courseId, Pageable pageable);
 
     @Query(AssignmentResponse.SELECT + "WHERE a.id = :id")
     Optional<AssignmentResponse> findViewById(@Param("id") Long id);
 
     @Query("SELECT a FROM Assignment a WHERE a.sourceDocument.id = :documentId")
     List<Assignment> findBySourceDocumentId(@Param("documentId") Long documentId);
+
+    @Query("SELECT a FROM Assignment a WHERE a.sourceDocument.id IN :documentIds")
+    List<Assignment> findBySourceDocumentIdIn(@Param("documentIds") Collection<Long> documentIds);
+
+    /** What duplicate detection compares: every assignment of a course, whatever its status. */
+    record MatchInfo(Long id, String title, LocalDateTime deadline, AssignmentStatus status) {
+    }
+
+    @Query("""
+            SELECT new com.university.docassistant.repository.AssignmentRepository$MatchInfo(a.id, a.title, a.deadline, a.status)
+            FROM Assignment a WHERE a.course.id = :courseId
+            """)
+    List<MatchInfo> findMatchInfoByCourseId(@Param("courseId") Long courseId);
+
+    @Query("SELECT a.status FROM Assignment a WHERE a.id = :id")
+    Optional<AssignmentStatus> findStatusById(@Param("id") Long id);
 
     /** [documentId, count] of assignments found in each of the documents, in one query. */
     @Query("""
@@ -45,6 +71,14 @@ public interface AssignmentRepository extends JpaRepository<Assignment, Long> {
 
     @Query("SELECT COUNT(a) FROM Assignment a WHERE a.sourceDocument.id = :documentId")
     long countBySourceDocumentId(@Param("documentId") Long documentId);
+
+    /** [documentId, status, count] of the assignments found in each of the documents, in one query. */
+    @Query("""
+            SELECT a.sourceDocument.id, a.status, COUNT(a) FROM Assignment a
+            WHERE a.sourceDocument.id IN :documentIds
+            GROUP BY a.sourceDocument.id, a.status
+            """)
+    List<Object[]> countByStatusForSourceDocumentIds(@Param("documentIds") Collection<Long> documentIds);
 
     @Query("SELECT a.course.id FROM Assignment a WHERE a.id = :id")
     Optional<Long> findCourseIdById(@Param("id") Long id);

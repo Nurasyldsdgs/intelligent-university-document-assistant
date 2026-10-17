@@ -6,6 +6,7 @@ import com.university.docassistant.entity.Document;
 import com.university.docassistant.entity.DocumentCategory;
 import com.university.docassistant.entity.DocumentClassification;
 import com.university.docassistant.entity.DocumentVisibility;
+import com.university.docassistant.entity.OcrStatus;
 import com.university.docassistant.entity.User;
 
 import java.time.LocalDateTime;
@@ -32,14 +33,21 @@ public record DocumentSummary(
         /** What the AI classifier chose and how sure it was; null when the category was picked by hand. */
         String aiCategory,
         Double aiConfidence,
-        AiStatus aiStatus
+        AiStatus aiStatus,
+        /** US-09: personal data items masked in the text, their kinds, and whether students may open the original. */
+        int piiCount,
+        String piiTypes,
+        boolean originalAllowedForStudents,
+        /** US-07: text recognition of a scan (null when none was needed), and whether the text came from it. */
+        OcrStatus ocrStatus,
+        boolean textFromOcr
 ) {
     /** Select list matching the canonical constructor; the queries alias Document as d, owner as o, course as c. */
     static final String SELECT = """
             SELECT new com.university.docassistant.repository.DocumentSummary(
                 d.id, d.originalFileName, d.contentType, d.fileSize, d.category, d.visibility, d.uploadedAt,
                 d.textSnippet, o.id, o.email, o.fullName, c.id, c.title, c.code, dc.categoryName, dc.confidenceScore,
-                d.aiStatus)
+                d.aiStatus, d.piiCount, d.piiTypes, d.originalAllowedForStudents, d.ocrStatus, d.textFromOcr)
             FROM Document d JOIN d.owner o LEFT JOIN d.course c
                 LEFT JOIN DocumentClassification dc ON dc.document = d
             """;
@@ -69,6 +77,11 @@ public record DocumentSummary(
                 course != null ? course.getCode() : null,
                 classification != null ? classification.getCategoryName() : null,
                 classification != null ? classification.getConfidenceScore() : null,
-                document.getAiStatus());
+                document.getAiStatus(),
+                document.getPiiCount(),
+                document.getPiiTypes(),
+                document.isOriginalAllowedForStudents(),
+                document.getOcrStatus(),
+                document.isTextFromOcr());
     }
 }

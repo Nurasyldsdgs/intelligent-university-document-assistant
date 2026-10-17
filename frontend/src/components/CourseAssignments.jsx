@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ClipboardList, Loader2, Plus } from 'lucide-react'
+import { ClipboardList, Loader2, Lock, LockOpen, Pencil, Plus } from 'lucide-react'
 import api, { describeError } from '../api/axios'
 import { useToast } from '../context/ToastContext'
 import useConfirm from '../hooks/useConfirm'
 import TaskItem from './TaskItem'
 import TaskSubmissions from './TaskSubmissions'
 import ErrorState from './ErrorState'
+import AssignmentEditDialog from './AssignmentEditDialog'
 
 const PAGE_SIZE = 20
 const inputClass = 'w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-white outline-none transition placeholder:text-slate-500 dark:placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 dark:focus:ring-indigo-500/30'
 
 /**
  * The course's assignments (found by the AI in its documents or added by hand). Every enrolled student gets each one
- * as a task. With {@code canManage} (course teacher, ADMIN) assignments can be added and deleted.
+ * as a task. With {@code canManage} (course teacher, ADMIN) assignments can be added, edited, closed, reopened and
+ * deleted.
  */
 export default function CourseAssignments({ courseId, canManage, version = 0 }) {
   const { notifyError, showSuccess } = useToast()
@@ -23,6 +25,7 @@ export default function CourseAssignments({ courseId, canManage, version = 0 }) 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0) // Bumped by "Повторить" to run the load again.
+  const [editing, setEditing] = useState(null) // the assignment in the edit dialog
 
   const [loadingMore, setLoadingMore] = useState(false)
 
@@ -105,6 +108,66 @@ export default function CourseAssignments({ courseId, canManage, version = 0 }) 
 
   const update = (field) => (event) => setForm((current) => ({ ...current, [field]: event.target.value }))
 
+  // A closed assignment stays with its students' work but takes no more submissions; reopening hands it out again.
+  const setClosed = async (assignment, close) => {
+    const confirmed = await confirm(close ? {
+      title: 'Закрыть задание?',
+      message: `«${assignment.title}» останется в курсе вместе с решениями студентов, но новые решения приниматься не будут.`,
+      confirmLabel: 'Закрыть',
+    } : {
+      title: 'Открыть задание снова?',
+      message: `Студенты снова смогут сдавать решения к «${assignment.title}»; те, у кого задачи ещё нет, получат её.`,
+      confirmLabel: 'Открыть снова',
+      tone: 'primary',
+    })
+    if (!confirmed) return
+    setBusyId(assignment.id)
+    try {
+      await api.post(`/assignments/${assignment.id}/${close ? 'close' : 'reopen'}`)
+      await load()
+      showSuccess(close ? 'Задание закрыто' : 'Задание снова открыто')
+    } catch (err) {
+      notifyError(err)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const actionClass = 'inline-flex shrink-0 items-center gap-1 self-start rounded-lg border px-2 py-1 text-xs font-medium transition disabled:opacity-60'
+  const manageActions = (assignment) => (
+    <>
+      <button
+        type="button"
+        onClick={() => setEditing(assignment)}
+        disabled={busyId === assignment.id}
+        aria-label={`Изменить «${assignment.title}»`}
+        title="Изменить название, требования или дедлайн"
+        className={`${actionClass} border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800`}
+      >
+        <Pencil className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Изменить</span>
+      </button>
+      {assignment.status === 'CLOSED' ? (
+        <button
+          type="button"
+          onClick={() => setClosed(assignment, false)}
+          disabled={busyId === assignment.id}
+          className={`${actionClass} border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-500/10`}
+        >
+          <LockOpen className="h-3.5 w-3.5" /> Открыть снова
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setClosed(assignment, true)}
+          disabled={busyId === assignment.id}
+          className={`${actionClass} border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-500/10`}
+        >
+          <Lock className="h-3.5 w-3.5" /> Закрыть
+        </button>
+      )}
+    </>
+  )
+
   return (
     <section id="assignments" className="scroll-mt-20 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
       <h2 className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 px-5 py-3.5 text-sm font-semibold text-slate-900 dark:text-white">
@@ -128,6 +191,7 @@ export default function CourseAssignments({ courseId, canManage, version = 0 }) 
                 task={assignment}
                 showDocument
                 onDelete={canManage ? remove : undefined}
+                actions={canManage && manageActions(assignment)}
                 updating={busyId === assignment.id}
                 extra={canManage && <TaskSubmissions key={assignment.id} assignmentId={assignment.id} />}
               />
@@ -160,6 +224,7 @@ export default function CourseAssignments({ courseId, canManage, version = 0 }) 
         )}
       </div>
       {confirmDialog}
+      {editing && <AssignmentEditDialog assignment={editing} onClose={() => setEditing(null)} onSaved={() => load().catch(notifyError)} />}
     </section>
   )
 }

@@ -48,6 +48,24 @@ public final class ErrorCodes {
     public static final String COURSE_NOT_FOUND = "COURSE_NOT_FOUND";
     public static final String DOCUMENT_NOT_FOUND = "DOCUMENT_NOT_FOUND";
     public static final String ASSIGNMENT_NOT_FOUND = "ASSIGNMENT_NOT_FOUND";
+    /** 409: the assignment has student work (submissions or changed statuses); close it instead of deleting. */
+    public static final String ASSIGNMENT_HAS_ACTIVITY = "ASSIGNMENT_HAS_ACTIVITY";
+    /** 409: the assignment is closed and takes no more submissions. */
+    public static final String ASSIGNMENT_CLOSED = "ASSIGNMENT_CLOSED";
+    /** 400: publishing something that is not a DRAFT of this course (unknown id, other course, already published). */
+    public static final String ASSIGNMENT_NOT_DRAFT = "ASSIGNMENT_NOT_DRAFT";
+    /** 400: a draft without a title cannot be published. */
+    public static final String ASSIGNMENT_TITLE_REQUIRED = "ASSIGNMENT_TITLE_REQUIRED";
+    /** 400: a DRAFT cannot be closed (that would show it to students); publish or delete it. */
+    public static final String ASSIGNMENT_IS_DRAFT = "ASSIGNMENT_IS_DRAFT";
+    /** 403: the original file contains personal data and the course teacher has not opened it to students. */
+    public static final String PII_ORIGINAL_RESTRICTED = "PII_ORIGINAL_RESTRICTED";
+    /** 503: OCR is switched off or Tesseract is missing on the server (US-07). */
+    public static final String OCR_UNAVAILABLE = "OCR_UNAVAILABLE";
+    /** 409: only a failed text recognition can be retried. */
+    public static final String OCR_NOT_FAILED = "OCR_NOT_FAILED";
+    /** 409: the AI or OCR is still working on the document; wait until it finishes. */
+    public static final String DOCUMENT_BEING_PROCESSED = "DOCUMENT_BEING_PROCESSED";
     public static final String TASK_NOT_FOUND = "TASK_NOT_FOUND";
     public static final String SUBMISSION_NOT_FOUND = "SUBMISSION_NOT_FOUND";
     public static final String ENDPOINT_NOT_FOUND = "ENDPOINT_NOT_FOUND";

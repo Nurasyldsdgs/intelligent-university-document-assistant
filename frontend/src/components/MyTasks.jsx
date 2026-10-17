@@ -123,7 +123,9 @@ export default function MyTasks({ onStatusChanged }) {
                 showDocument
                 onStatusChange={changeStatus}
                 updating={updatingId === task.id}
-                extra={task.assignmentId && <TaskSubmissions taskId={task.id} count={task.submissionCount ?? 0} />}
+                extra={task.assignmentId && (
+                  <TaskSubmissions taskId={task.id} count={task.submissionCount ?? 0} closed={task.assignmentStatus === 'CLOSED'} />
+                )}
               />
             ))}
           </ul>

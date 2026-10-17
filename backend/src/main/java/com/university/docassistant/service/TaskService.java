@@ -6,7 +6,9 @@ import com.university.docassistant.entity.TaskStatus;
 import com.university.docassistant.entity.User;
 import com.university.docassistant.exception.ApiException;
 import com.university.docassistant.exception.ErrorCodes;
+import com.university.docassistant.repository.EnrollmentRepository;
 import com.university.docassistant.repository.TaskRepository;
+import com.university.docassistant.repository.TaskRepository.TaskAccess;
 import com.university.docassistant.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -27,6 +29,7 @@ public class TaskService {
 
     private final TaskRepository taskRepository;
     private final UserRepository userRepository;
+    private final EnrollmentRepository enrollmentRepository;
 
     @Transactional(readOnly = true)
     public PageResponse<TaskResponse> listMine(String email, TaskStatus status, Pageable pageable) {
@@ -47,10 +50,14 @@ public class TaskService {
     @Transactional
     public TaskResponse updateStatus(Long id, TaskStatus status, String email) {
         User user = currentUser(email);
-        Long ownerId = taskRepository.findUserIdById(id)
+        TaskAccess task = taskRepository.findAccessById(id)
                 .orElseThrow(() -> ApiException.notFound(ErrorCodes.TASK_NOT_FOUND, "Task not found"));
-        if (!ownerId.equals(user.getId())) {
+        if (!task.userId().equals(user.getId())) {
             throw ApiException.forbidden(ErrorCodes.TASK_NOT_OWN, "You can change only your own tasks");
+        }
+        // A student who left the course keeps the task for the teacher, but cannot work on it until they re-enroll.
+        if (task.courseId() != null && !enrollmentRepository.existsByStudentIdAndCourseId(user.getId(), task.courseId())) {
+            throw ApiException.forbidden(ErrorCodes.COURSE_NOT_ENROLLED, "You are not enrolled in this course");
         }
         taskRepository.updateStatus(id, status);
         return taskRepository.findViewById(id)

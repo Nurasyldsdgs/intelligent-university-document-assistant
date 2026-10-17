@@ -3,9 +3,19 @@ import { CalendarClock, HardDrive, Loader2, User } from 'lucide-react'
 import api, { getBlobErrorMessage } from '../api/axios'
 import { formatSize, getFileFormat, isImage, isPreviewable } from '../utils/fileTypes'
 import { formatDateTime } from '../utils/dates'
+import { isOriginalRestricted } from '../utils/privacy'
+import RestrictedOriginalNotice from './RestrictedOriginalNotice'
 
-/** Inline preview for PDF and images (GET /documents/{id}/view); other types get a metadata card. */
-export default function DocumentPreview({ doc }) {
+/**
+ * Inline preview for PDF and images (GET /documents/{id}/view); other types get a metadata card. An original with
+ * personal data that is closed to this viewer is never requested: a notice points to the masked text instead
+ * ({@code onShowText} opens the "Текст" tab).
+ */
+export default function DocumentPreview({ doc, onShowText }) {
+  return isOriginalRestricted(doc) ? <RestrictedOriginalNotice onShowText={onShowText} /> : <OriginalPreview doc={doc} />
+}
+
+function OriginalPreview({ doc }) {
   const format = getFileFormat(doc)
   const previewable = isPreviewable(doc)
   // Only fetched for previewable types; otherwise the metadata card is shown straight away.

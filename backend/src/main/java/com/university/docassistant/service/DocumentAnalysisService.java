@@ -77,13 +77,13 @@ public class DocumentAnalysisService {
                 log.debug("AI analysis skipped for document {}: category {}", documentId, source.category());
                 return;
             }
-            if (source.extractedText() == null) {
+            if (source.maskedText() == null) {
                 log.info("AI analysis skipped for document {}: no extracted text", documentId);
                 return;
             }
 
             long started = System.currentTimeMillis();
-            Optional<Analysis> analysis = extractionService.analyze(source.extractedText());
+            Optional<Analysis> analysis = extractionService.analyze(source.maskedText());
             if (analysis.isEmpty()) {
                 // Unavailable AI or an unusable answer: the previous summary and assignments are kept, not wiped.
                 log.info("AI analysis of document {} produced no result ({} ms)", documentId,

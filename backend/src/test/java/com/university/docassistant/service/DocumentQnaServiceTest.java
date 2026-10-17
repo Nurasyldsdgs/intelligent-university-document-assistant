@@ -1,6 +1,7 @@
 package com.university.docassistant.service;
 
 import com.university.docassistant.config.AiProperties;
+import com.university.docassistant.config.PrivacyProperties;
 import com.university.docassistant.dto.DocumentAnswerResponse;
 import com.university.docassistant.dto.SourceSnippetDto;
 import com.university.docassistant.entity.Document;
@@ -43,7 +44,8 @@ class DocumentQnaServiceTest {
     private final AccessControlService access = mock(AccessControlService.class);
     private final AiClientService ai = mock(AiClientService.class);
     private final DocumentQnaService service = new DocumentQnaService(documentService, chunks, access, ai,
-            new AiProperties(true, "key", "m", "http://x", Duration.ofSeconds(1), Duration.ofSeconds(1), 1, 1, 1, 2, 1));
+            new AiProperties(true, "key", "m", "http://x", Duration.ofSeconds(1), Duration.ofSeconds(1), 1, 1, 1, 2, 1),
+            new DocumentPrivacyService(new PrivacyProperties(null, null)));
 
     private final Document document = Document.builder().id(7L).textSnippet("Силлабус").build();
     private final User student = User.builder().id(5L).email(EMAIL).role(Role.ROLE_STUDENT).build();

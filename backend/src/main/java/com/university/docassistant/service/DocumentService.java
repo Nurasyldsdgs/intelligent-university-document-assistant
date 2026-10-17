@@ -12,9 +12,11 @@ import com.university.docassistant.dto.UploadDtos.UploadedDocument;
 import com.university.docassistant.dto.BatchImportResponse;
 import com.university.docassistant.dto.DocumentStatusResponse;
 import com.university.docassistant.entity.AiStatus;
+import com.university.docassistant.entity.AssignmentStatus;
 import com.university.docassistant.entity.BatchImport;
 import com.university.docassistant.entity.Course;
 import com.university.docassistant.entity.Document;
+import com.university.docassistant.entity.OcrStatus;
 import com.university.docassistant.entity.DocumentCategory;
 import com.university.docassistant.entity.DocumentClassification;
 import com.university.docassistant.entity.DocumentType;
@@ -34,6 +36,7 @@ import com.university.docassistant.security.AccessControlService.Scope;
 import com.university.docassistant.security.Permission;
 import com.university.docassistant.service.DocumentParserService.ExtractedText;
 import com.university.docassistant.service.storage.StorageService;
+import com.university.docassistant.util.PersonalDataMasker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.Resource;
@@ -107,6 +110,8 @@ public class DocumentService {
     private final DocumentClassificationService classificationService;
     private final DocumentProcessingService documentProcessingService;
     private final BatchImportRepository batchImportRepository;
+    private final AssignmentService assignmentService;
+    private final DocumentPrivacyService privacyService;
 
     public record DocumentContent(Document document, Resource content) {
     }
@@ -275,6 +280,15 @@ public class DocumentService {
     }
 
     /** Analyzing exam answers into assignments would hand their titles and deadlines to students as tasks. */
+    static final String BEING_PROCESSED = "ИИ или распознавание текста ещё обрабатывают документ. Подождите, пока "
+            + "они закончат.";
+    static final String OCR_UNAVAILABLE = "Распознавание сканов не настроено на сервере.";
+    static final String OCR_NOT_FAILED = "Повторить можно только неудавшееся распознавание; сейчас оно не требуется "
+            + "или уже идёт.";
+
+    static final String ORIGINAL_RESTRICTED = "В оригинале документа есть персональные данные, преподаватель не открыл "
+            + "его студентам. Доступна текстовая версия, где эти данные скрыты.";
+
     static final String EXAM_ANSWERS_NOT_ANALYZED = "Ответы к экзамену не анализируются на задания";
 
     /**
@@ -298,6 +312,14 @@ public class DocumentService {
 
         // A failed parse only leaves the document without text; it never fails the upload.
         ExtractedText extracted = extractText(content, fileName, contentType);
+        // US-09: personal data is masked before anything is built from the text. The snippet, the Q&A chunks, search
+        // and every AI job use the masked copy; the original stays in extracted_text. The teacher's e-mail stays.
+        User teacher = target.course().getTeacher();
+        DocumentPrivacyService.PreparedText prepared = privacyService.prepare(extracted.text(),
+                teacher == null ? null : teacher.getEmail());
+        PersonalDataMasker.Result masked = prepared.masked();
+        // US-07: a scan (PDF/image without text) is queued for OCR; it runs in the background job, never here.
+        boolean needsOcr = documentProcessingService.needsOcr(contentType, extracted.text());
 
         DocumentCategory category = chosenCategory != null ? chosenCategory : DocumentCategory.OTHER;
         AiStatus aiStatus = chosenCategory != null ? AiStatus.MANUAL
@@ -319,7 +341,12 @@ public class DocumentService {
                     .contentType(contentType)
                     .fileSize((long) content.length)
                     .extractedText(extracted.text())
-                    .textSnippet(DocumentParserService.snippet(extracted.text()))
+                    .maskedText(masked.text())
+                    .piiCount(masked.count())
+                    .piiTypes(masked.typesText())
+                    .piiScan(prepared.fingerprint())
+                    .textSnippet(prepared.snippet())
+                    .ocrStatus(needsOcr ? OcrStatus.PENDING : null)
                     .textTruncated(extracted.truncated())
                     .category(category)
                     .type(DocumentType.fromCategory(category))
@@ -342,11 +369,13 @@ public class DocumentService {
                 "Document " + document.getId() + " \"" + fileName + "\" ("
                         + (aiStatus == AiStatus.PENDING ? "AI classification pending" : category.toString())
                         + ") in course " + target.course().getId()
-                        + (visibilityForced ? ", visibility forced to TEACHER_ONLY" : ""));
+                        + (visibilityForced ? ", visibility forced to TEACHER_ONLY" : "")
+                        + (masked.count() > 0 ? ", personal data masked: " + masked.count() + " (" + masked.typesText() + ")" : "")
+                        + (needsOcr ? ", queued for OCR" : ""));
 
         if (extracted.text() != null) {
             try {
-                documentChunkService.index(document.getId(), extracted.text());
+                documentChunkService.index(document.getId(), masked.text());
             } catch (RuntimeException ex) {
                 // Q&A is unavailable for this document until DocumentChunkBackfill retries at the next start.
                 log.warn("Could not chunk document {} for Q&A: {}", document.getId(), ex.toString());
@@ -354,14 +383,100 @@ public class DocumentService {
         }
 
         // The row is committed by now (upload runs without a transaction), so the background jobs can read it.
+        // The classification job recognizes a scan first; a scan with a known category gets an OCR job of its own,
+        // which runs the deadline analysis afterwards.
         if (aiStatus == AiStatus.PENDING) {
             submitProcessing(document.getId());
+        } else if (needsOcr) {
+            submitOcr(document.getId());
         } else if (extracted.text() != null && DocumentAnalysisService.AUTO_ANALYZED.contains(category)
                 && aiClientService.isConfigured()) {
             submitAnalysis(document.getId(), false);
         }
         // aiClassified stays false here: the AI has not chosen anything yet when the upload answers.
         return new UploadedDocument(toResponse(DocumentSummary.of(document), target.owner(), true), false);
+    }
+
+    /**
+     * "Указать тип вручную": the course teacher (or ADMIN) sets the category the AI could not find, e.g. for a scan
+     * whose text was not recognized. Same rules as an AI result: EXAM_ANSWERS become TEACHER_ONLY (rule A) and are
+     * never analyzed (rule B); a SYLLABUS or ASSIGNMENT with text gets its deadline analysis. 409 while the AI or OCR
+     * still works on the document. Audited.
+     */
+    @Transactional
+    public DocumentResponse setCategory(Long id, DocumentCategory category, String email) {
+        User user = access.currentUser(email);
+        Document document = access.authorizeDocument(user, id, Permission.MANAGE_COURSE);
+        if (isBeingProcessed(document)) {
+            throw ApiException.conflict(ErrorCodes.DOCUMENT_BEING_PROCESSED, BEING_PROCESSED);
+        }
+        documentRepository.updateClassification(id, category, DocumentType.fromCategory(category), AiStatus.MANUAL);
+        classificationService.clearResult(id);
+        boolean forced = category == DocumentCategory.EXAM_ANSWERS && documentRepository.forceTeacherOnly(id) > 0;
+        auditService.record(user.getEmail(), AuditService.DOCUMENT_CATEGORY_SET, "Document " + id + " \""
+                + document.getOriginalFileName() + "\" set to " + category + " by hand"
+                + (forced ? ", visibility forced to TEACHER_ONLY" : ""));
+        if (document.getMaskedText() != null && DocumentAnalysisService.AUTO_ANALYZED.contains(category)
+                && aiClientService.isConfigured()) {
+            afterCommit(() -> submitAnalysis(id, false));
+        }
+        return get(id, email);
+    }
+
+    /**
+     * "Повторить распознавание": queues the processing job again for a scan whose OCR failed. A category the AI
+     * chose is chosen again from the new text (the document is PENDING meanwhile, hidden from students like any
+     * document being classified); a category chosen by hand stays and only the OCR and deadline analysis run.
+     * For the course teacher or ADMIN; 503 when OCR cannot run here, 409 when the OCR did not fail. Audited.
+     */
+    @Transactional
+    public DocumentResponse retryOcr(Long id, String email) {
+        User user = access.currentUser(email);
+        Document document = access.authorizeDocument(user, id, Permission.MANAGE_COURSE);
+        if (!documentProcessingService.ocrAvailable()) {
+            throw ApiException.of(HttpStatus.SERVICE_UNAVAILABLE, ErrorCodes.OCR_UNAVAILABLE, OCR_UNAVAILABLE);
+        }
+        if (isBeingProcessed(document) || documentRepository.changeOcrStatus(id, OcrStatus.FAILED, OcrStatus.PENDING) == 0) {
+            throw ApiException.conflict(ErrorCodes.OCR_NOT_FAILED, OCR_NOT_FAILED);
+        }
+        boolean reclassify = document.getAiStatus() != AiStatus.MANUAL && aiClientService.isConfigured();
+        if (reclassify) {
+            documentRepository.setAiStatus(id, AiStatus.PENDING);
+        }
+        auditService.record(user.getEmail(), AuditService.OCR_RETRY_REQUESTED, "Document " + id + " \""
+                + document.getOriginalFileName() + "\"" + (reclassify ? ", to be classified again" : ""));
+        // Submitted only after commit, otherwise the job could read the old statuses.
+        afterCommit(() -> {
+            if (reclassify) {
+                submitProcessing(id);
+            } else {
+                submitOcr(id);
+            }
+        });
+        return get(id, email);
+    }
+
+    private static boolean isBeingProcessed(Document document) {
+        return document.getAiStatus() == AiStatus.PENDING || document.getAiStatus() == AiStatus.PROCESSING
+                || document.getOcrStatus() == OcrStatus.PENDING || document.getOcrStatus() == OcrStatus.RUNNING;
+    }
+
+    private static void afterCommit(Runnable action) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                action.run();
+            }
+        });
+    }
+
+    /** A full queue leaves the document queued for OCR (ocr_status PENDING); OcrStartup queues it at the next start. */
+    private void submitOcr(Long documentId) {
+        try {
+            documentProcessingService.ocrAsync(documentId);
+        } catch (TaskRejectedException ex) {
+            log.warn("OCR of document {} not queued, it stays pending: {}", documentId, ex.getMessage());
+        }
     }
 
     /** False when the AI queue is full: the document stays PENDING and AiProcessingRecovery queues it at the next start. */
@@ -381,12 +496,35 @@ public class DocumentService {
      */
     @Transactional(readOnly = true)
     public DocumentStatusResponse status(Long id, String email) {
-        Document document = access.authorizeDocument(access.currentUser(email), id, Permission.VIEW_DOCUMENT);
+        User user = access.currentUser(email);
+        Document document = access.authorizeDocument(user, id, Permission.VIEW_DOCUMENT);
         Double confidence = document.getAiStatus() == AiStatus.DONE
                 ? classificationService.findResult(id).map(DocumentClassification::getConfidenceScore).orElse(null)
                 : null;
+        // A student sees the document, so this is the teacher of its course or ADMIN when not a student.
+        AssignmentCounts counts = assignmentCounts(List.of(id), user.getRole() != Role.ROLE_STUDENT)
+                .getOrDefault(id, AssignmentCounts.NONE);
         return new DocumentStatusResponse(document.getAiStatus(), document.getCategory(), confidence,
-                assignmentRepository.countBySourceDocumentId(id));
+                counts.total(), counts.drafts(), document.getOcrStatus(), document.isTextFromOcr());
+    }
+
+    /** Assignments found in a document: all of them, and of those the DRAFTs (both without drafts for a student). */
+    private record AssignmentCounts(long total, long drafts) {
+        static final AssignmentCounts NONE = new AssignmentCounts(0, 0);
+    }
+
+    private Map<Long, AssignmentCounts> assignmentCounts(List<Long> documentIds, boolean withDrafts) {
+        Map<Long, AssignmentCounts> counts = new HashMap<>();
+        for (Object[] row : assignmentRepository.countByStatusForSourceDocumentIds(documentIds)) {
+            boolean draft = row[1] == AssignmentStatus.DRAFT;
+            if (draft && !withDrafts) {
+                continue;
+            }
+            long count = (Long) row[2];
+            counts.merge((Long) row[0], new AssignmentCounts(count, draft ? count : 0),
+                    (a, b) -> new AssignmentCounts(a.total() + b.total(), a.drafts() + b.drafts()));
+        }
+        return counts;
     }
 
     static final int MAX_STATUS_IDS = 50;
@@ -417,15 +555,16 @@ public class DocumentService {
         if (visible.isEmpty()) {
             return List.of();
         }
-        Map<Long, Long> counts = new HashMap<>();
-        for (Object[] row : assignmentRepository.countBySourceDocumentIds(
-                visible.stream().map(DocumentRepository.StatusRow::id).toList())) {
-            counts.put((Long) row[0], (Long) row[1]);
-        }
+        // includeTeacherOnly: the teacher of these courses or ADMIN, who also review the drafts.
+        Map<Long, AssignmentCounts> counts = assignmentCounts(
+                visible.stream().map(DocumentRepository.StatusRow::id).toList(), scope.includeTeacherOnly());
         return visible.stream()
-                .map(row -> new DocumentStatusItem(row.id(), row.aiStatus(), row.category(),
-                        row.aiStatus() == AiStatus.DONE ? row.confidence() : null,
-                        counts.getOrDefault(row.id(), 0L)))
+                .map(row -> {
+                    AssignmentCounts found = counts.getOrDefault(row.id(), AssignmentCounts.NONE);
+                    return new DocumentStatusItem(row.id(), row.aiStatus(), row.category(),
+                            row.aiStatus() == AiStatus.DONE ? row.confidence() : null, found.total(), found.drafts(),
+                            row.ocrStatus(), row.textFromOcr());
+                })
                 .toList();
     }
 
@@ -584,7 +723,7 @@ public class DocumentService {
         return PageResponse.of(documents.map(document -> toResponse(document, user, canDelete(document, user, managed))));
     }
 
-    /** Full-text search over the extracted text, best match first, within the user's courses. */
+    /** Full-text search over the masked text (personal data finds nothing), best match first, within the user's courses. */
     @Transactional(readOnly = true)
     public PageResponse<DocumentResponse> search(String query, String email, Pageable pageable) {
         String trimmed = query == null ? "" : query.strip();
@@ -614,25 +753,92 @@ public class DocumentService {
         return PageResponse.of(new PageImpl<>(content, ids.getPageable(), ids.getTotalElements()));
     }
 
+    /**
+     * The document's text: the original for the course teacher and ADMIN, the masked copy (US-09) for everyone else.
+     * A student never receives the original text, whatever the file permission says.
+     */
     @Transactional(readOnly = true)
     public DocumentTextResponse text(Long id, String email) {
-        Document document = getViewable(id, email);
-        String text = document.getExtractedText();
+        User user = access.currentUser(email);
+        Document document = access.authorizeDocument(user, id, Permission.VIEW_DOCUMENT);
+        boolean original = access.can(user, document, Permission.MANAGE_COURSE);
+        String text = original ? document.getExtractedText() : maskedText(document);
         return new DocumentTextResponse(document.getId(), document.getOriginalFileName(),
-                text != null, document.isTextTruncated(), text);
+                text != null, document.isTextTruncated(), text, !original, document.getPiiCount());
     }
 
+    /** The stored masked copy; masked now if the startup backfill has not reached this document yet. */
+    private String maskedText(Document document) {
+        if (document.getMaskedText() != null || document.getExtractedText() == null) {
+            return document.getMaskedText();
+        }
+        User teacher = document.getCourse() == null ? null : document.getCourse().getTeacher();
+        return privacyService.mask(document.getExtractedText(), teacher == null ? null : teacher.getEmail()).text();
+    }
+
+    /** The original file as an attachment; see {@link #openOriginal}. */
     @Transactional(readOnly = true)
     public DocumentContent download(Long id, String email) {
-        Document document = getViewable(id, email);
+        return openOriginal(id, email, "download");
+    }
+
+    /** The original file for the inline preview; see {@link #openOriginal}. */
+    @Transactional(readOnly = true)
+    public DocumentContent view(Long id, String email) {
+        return openOriginal(id, email, "view");
+    }
+
+    /**
+     * The original file. When its text contains personal data (pii_count > 0) a student gets it only if the course
+     * teacher allowed it (403 PII_ORIGINAL_RESTRICTED otherwise); every opening of such an original - by the teacher,
+     * ADMIN or an allowed student - is audited as PII_ORIGINAL_VIEWED.
+     */
+    private DocumentContent openOriginal(Long id, String email, String how) {
+        User user = access.currentUser(email);
+        Document document = access.authorizeDocument(user, id, Permission.VIEW_DOCUMENT);
+        if (document.getPiiCount() > 0) {
+            boolean managesCourse = access.can(user, document, Permission.MANAGE_COURSE);
+            if (!managesCourse && !document.isOriginalAllowedForStudents()) {
+                auditService.record(user.getEmail(), AuditService.ACCESS_DENIED,
+                        "Original of document " + id + " (" + how + "): contains personal data");
+                throw ApiException.forbidden(ErrorCodes.PII_ORIGINAL_RESTRICTED, ORIGINAL_RESTRICTED);
+            }
+            auditService.record(user.getEmail(), AuditService.PII_ORIGINAL_VIEWED, "Document " + id + " \""
+                    + document.getOriginalFileName() + "\" (" + how + ", " + document.getPiiCount()
+                    + " personal data item(s): " + document.getPiiTypes() + ")");
+        }
         return new DocumentContent(document, storageService.load(document.getStoredFileName()));
     }
 
-    /** Removes the document with the assignments found in it and their students' tasks. */
+    /**
+     * Lets the course's students open the original file although it contains personal data, or takes that back.
+     * For the course teacher or ADMIN (MANAGE_COURSE); audited.
+     */
+    @Transactional
+    public DocumentResponse setOriginalAllowedForStudents(Long id, boolean allowed, String email) {
+        User user = access.currentUser(email);
+        Document document = access.authorizeDocument(user, id, Permission.MANAGE_COURSE);
+        if (document.isOriginalAllowedForStudents() != allowed) {
+            document.setOriginalAllowedForStudents(allowed);
+            documentRepository.save(document);
+            auditService.record(user.getEmail(),
+                    allowed ? AuditService.PII_ORIGINAL_ALLOWED : AuditService.PII_ORIGINAL_DENIED,
+                    "Document " + id + " \"" + document.getOriginalFileName() + "\" ("
+                            + document.getPiiCount() + " personal data item(s))");
+        }
+        return toResponse(DocumentSummary.of(document, classificationService.findResult(id).orElse(null)), user,
+                access.can(user, document, Permission.DELETE_DOCUMENT));
+    }
+
+    /**
+     * Removes the document with the assignments found in it and their students' tasks. Assignments with student work
+     * are kept instead, CLOSED and unlinked from the document (AssignmentService.releaseDocuments).
+     */
     @Transactional
     public void delete(Long id, String email) {
         User user = access.currentUser(email);
         Document document = access.authorizeDocument(user, id, Permission.DELETE_DOCUMENT);
+        assignmentService.releaseDocuments(List.of(id), user.getEmail());
         taskRepository.deleteByAssignmentSourceDocumentId(id);
         assignmentRepository.deleteBySourceDocumentId(id);
         taskRepository.deleteByDocumentId(id);
@@ -686,7 +892,13 @@ public class DocumentService {
                 document.ownerId().equals(viewer.getId()),
                 document.aiCategory(),
                 document.aiConfidence(),
-                document.aiStatus());
+                document.aiStatus(),
+                document.piiCount(),
+                // Which kinds of personal data a document holds is itself a hint: only for the teacher and ADMIN.
+                viewer.getRole() == Role.ROLE_STUDENT ? null : document.piiTypes(),
+                document.originalAllowedForStudents(),
+                document.ocrStatus(),
+                document.textFromOcr());
     }
 
     // Keeps only the last path segment (browsers may send "C:\...\name.pdf") and bounds the length.

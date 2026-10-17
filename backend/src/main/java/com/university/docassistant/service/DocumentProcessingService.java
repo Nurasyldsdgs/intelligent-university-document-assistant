@@ -40,6 +40,7 @@ public class DocumentProcessingService {
     private final DocumentClassificationService classificationService;
     private final DocumentAnalysisService analysisService;
     private final AuditService auditService;
+    private final DocumentOcrService ocrService;
     private final TransactionTemplate transaction;
     private final TransactionTemplate newTransaction;
 
@@ -48,12 +49,14 @@ public class DocumentProcessingService {
                                      DocumentClassificationService classificationService,
                                      DocumentAnalysisService analysisService,
                                      AuditService auditService,
-                                     PlatformTransactionManager transactionManager) {
+                                     PlatformTransactionManager transactionManager,
+                                     DocumentOcrService ocrService) {
         this.documentRepository = documentRepository;
         this.classificationRepository = classificationRepository;
         this.classificationService = classificationService;
         this.analysisService = analysisService;
         this.auditService = auditService;
+        this.ocrService = ocrService;
         this.transaction = new TransactionTemplate(transactionManager);
         this.newTransaction = new TransactionTemplate(transactionManager);
         this.newTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -65,7 +68,33 @@ public class DocumentProcessingService {
         process(documentId);
     }
 
-    /** Classifies one PENDING document in the caller's thread; does nothing for any other status. Never throws. */
+    /**
+     * US-07: OCR for a scan whose category is already known (chosen by hand, or no AI to classify it), then the
+     * deadline analysis of a syllabus or an assignment, as an upload with text would get it. Throws
+     * TaskRejectedException when the AI queue is full (the document stays queued for OCR until the next start).
+     */
+    @Async(AsyncConfig.AI_EXECUTOR)
+    public void ocrAsync(Long documentId) {
+        if (ocrService.runIfPending(documentId) == DocumentOcrService.Outcome.DONE) {
+            analysisService.analyzeNow(documentId, true);
+        }
+    }
+
+    /** Whether OCR can run on this server at all. */
+    public boolean ocrAvailable() {
+        return ocrService.isAvailable();
+    }
+
+    /** Whether an upload with this type and extracted text must be queued for OCR; see DocumentOcrService. */
+    public boolean needsOcr(String contentType, String extractedText) {
+        return ocrService.needsOcr(contentType, extractedText);
+    }
+
+    /**
+     * Classifies one PENDING document in the caller's thread; does nothing for any other status. Never throws.
+     * Order: OCR of a scan (if queued) -> masking and chunks (stored with the recognized text) -> classification ->
+     * deadline drafts.
+     */
     public void process(Long documentId) {
         DocumentCategory finalCategory;
         boolean hasText;
@@ -76,16 +105,18 @@ public class DocumentProcessingService {
                 log.debug("Classification of document {} skipped: not PENDING", documentId);
                 return;
             }
+            // A scan gets its text first, so the classifier and the analysis see it (never throws).
+            ocrService.runIfPending(documentId);
             ClassificationSource source = documentRepository.findClassificationSource(documentId).orElse(null);
             if (source == null) {
                 log.info("Classification skipped: document {} no longer exists", documentId);
                 return;
             }
-            hasText = source.extractedText() != null;
+            hasText = source.maskedText() != null;
 
             long started = System.currentTimeMillis();
             Optional<ClassificationResult> result =
-                    classificationService.classify(source.originalFileName(), source.extractedText());
+                    classificationService.classify(source.originalFileName(), source.maskedText());
             finalCategory = transaction.execute(status -> store(source, result.orElse(null)));
             log.info("Document {} classified as {} in background ({} ms)", documentId,
                     finalCategory == null ? "(deleted meanwhile)" : finalCategory + (result.isEmpty() ? ", FAILED" : ""),

@@ -11,9 +11,12 @@ import ConfirmDialog from '../components/ConfirmDialog'
 import ErrorState from '../components/ErrorState'
 import CourseChat from '../components/CourseChat'
 import CourseAssignments from '../components/CourseAssignments'
+import CourseDrafts from '../components/CourseDrafts'
 import CourseStudents from '../components/CourseStudents'
 import DocumentUpload from '../components/DocumentUpload'
 import DocumentAiBadge from '../components/DocumentAiBadge'
+import PiiBadge from '../components/PiiBadge'
+import OcrBadge from '../components/OcrBadge'
 import ReclassifyButton from '../components/ReclassifyButton'
 import { canDeleteDocument, getFileFormat } from '../utils/fileTypes'
 import { formatDateTime } from '../utils/dates'
@@ -28,6 +31,8 @@ export default function CoursePage() {
   const [details, setDetails] = useState(null)
   const [error, setError] = useState(null)
   const [docsVersion, setDocsVersion] = useState(0) // Bumped after an upload to reload the list.
+  // Bumped after drafts are published, so the course's assignments list shows them.
+  const [assignmentsVersion, setAssignmentsVersion] = useState(0)
 
   const loadDetails = useCallback(() => api.get(`/courses/${id}`).then(({ data }) => setDetails(data)), [id])
 
@@ -110,7 +115,10 @@ export default function CoursePage() {
               <div className="space-y-4">
                 {canManage && <DocumentUpload course={course} onUploaded={() => setDocsVersion((version) => version + 1)} />}
                 <CourseDocuments courseId={course.id} version={docsVersion} />
-                <CourseAssignments courseId={course.id} canManage={canManage} version={docsVersion} />
+                {canManage && (
+                  <CourseDrafts courseId={course.id} version={docsVersion} onPublished={() => setAssignmentsVersion((version) => version + 1)} />
+                )}
+                <CourseAssignments courseId={course.id} canManage={canManage} version={docsVersion + assignmentsVersion} />
                 {canManage && <CourseStudents courseId={course.id} onChange={() => loadDetails().catch(() => {})} />}
               </div>
               <div className="lg:sticky lg:top-20 lg:self-start">
@@ -300,6 +308,8 @@ function CourseDocuments({ courseId, version }) {
                       <span className="block truncate text-sm font-medium text-slate-900 dark:text-white group-hover:text-indigo-700 dark:group-hover:text-indigo-300">{doc.originalFileName}</span>
                       <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
                         <DocumentAiBadge doc={doc} />
+                        <PiiBadge doc={doc} />
+                        <OcrBadge doc={doc} />
                         <span className="truncate">{VISIBILITY_LABELS[doc.visibility]} · {formatDateTime(doc.uploadedAt)}</span>
                       </span>
                     </span>

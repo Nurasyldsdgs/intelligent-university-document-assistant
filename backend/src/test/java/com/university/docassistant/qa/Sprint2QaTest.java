@@ -1,5 +1,7 @@
 package com.university.docassistant.qa;
 
+import com.university.docassistant.service.DocumentPrivacyService;
+import com.university.docassistant.config.PrivacyProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.university.docassistant.config.AiProperties;
 import com.university.docassistant.dto.TaskExtractDto;
@@ -34,6 +36,7 @@ import com.university.docassistant.service.AuditService;
 import com.university.docassistant.service.DocumentAnalysisService;
 import com.university.docassistant.service.DocumentChunkService;
 import com.university.docassistant.service.DocumentClassificationService;
+import com.university.docassistant.service.DocumentOcrService;
 import com.university.docassistant.service.DocumentParserService;
 import com.university.docassistant.service.DocumentParserService.ExtractedText;
 import com.university.docassistant.service.DocumentProcessingService;
@@ -118,7 +121,8 @@ class Sprint2QaTest {
     private final AccessControlService access = new AccessControlService(users, courses, documents, enrollments, audit);
     private final DocumentService documentService = new DocumentService(documents, mock(TaskRepository.class),
             mock(AssignmentRepository.class), access, storage, parser, mock(DocumentAnalysisService.class), ai,
-            mock(DocumentChunkService.class), audit, classifier, processing, imports);
+            mock(DocumentChunkService.class), audit, classifier, processing, imports, mock(AssignmentService.class),
+            new DocumentPrivacyService(new PrivacyProperties(null, null)));
 
     private final List<Document> savedDocuments = new ArrayList<>();
 
@@ -204,11 +208,13 @@ class Sprint2QaTest {
         private final AiProperties properties = new AiProperties(true, "test-key", "openai/gpt-oss-120b",
                 "http://ai.test", Duration.ofSeconds(1), Duration.ofSeconds(1), 60_000, 1, 1, 1, 1);
         private final DocumentClassificationService realClassifier =
-                new DocumentClassificationService(ai, classificationRows, documents, new ObjectMapper());
+                new DocumentClassificationService(ai, classificationRows, documents, new ObjectMapper(),
+                        new DocumentPrivacyService(new PrivacyProperties(null, null)));
         private final DocumentAnalysisService analysis = new DocumentAnalysisService(documents, assignments,
                 new AiTaskExtractionService(ai, properties, new ObjectMapper()), mock(PlatformTransactionManager.class));
         private final DocumentProcessingService realProcessing = new DocumentProcessingService(documents,
-                classificationRows, realClassifier, analysis, audit, mock(PlatformTransactionManager.class));
+                classificationRows, realClassifier, analysis, audit, mock(PlatformTransactionManager.class),
+                mock(DocumentOcrService.class));
 
         /** documents table, in memory: id -> {status, category}. */
         private final Map<Long, AiStatus> status = new HashMap<>();

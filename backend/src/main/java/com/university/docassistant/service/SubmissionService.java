@@ -1,6 +1,7 @@
 package com.university.docassistant.service;
 
 import com.university.docassistant.dto.SubmissionDtos.SubmissionResponse;
+import com.university.docassistant.entity.AssignmentStatus;
 import com.university.docassistant.entity.Course;
 import com.university.docassistant.entity.TaskSubmission;
 import com.university.docassistant.entity.User;
@@ -76,6 +77,9 @@ public class SubmissionService {
         if (!access.isMember(student, course)) {
             auditService.record(student.getEmail(), AuditService.ACCESS_DENIED, "SUBMIT_TASK on task " + taskId);
             throw ApiException.forbidden(ErrorCodes.COURSE_NOT_ENROLLED, "You are not enrolled in this course");
+        }
+        if (assignmentRepository.findStatusById(task.assignmentId()).orElse(null) == AssignmentStatus.CLOSED) {
+            throw ApiException.conflict(ErrorCodes.ASSIGNMENT_CLOSED, "Задание закрыто, новые решения не принимаются");
         }
 
         List<PreparedFile> prepared = prepare(files);

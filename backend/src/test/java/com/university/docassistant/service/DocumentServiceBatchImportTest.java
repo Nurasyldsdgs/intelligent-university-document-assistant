@@ -1,5 +1,6 @@
 package com.university.docassistant.service;
 
+import com.university.docassistant.config.PrivacyProperties;
 import com.university.docassistant.dto.UploadDtos.BatchUploadResponse;
 import com.university.docassistant.entity.BatchImport;
 import com.university.docassistant.entity.Course;
@@ -54,7 +55,7 @@ class DocumentServiceBatchImportTest {
     private final DocumentService service = new DocumentService(documents, mock(TaskRepository.class),
             mock(AssignmentRepository.class), access, storage, parser, mock(DocumentAnalysisService.class), ai,
             mock(DocumentChunkService.class), audit, mock(DocumentClassificationService.class),
-            mock(DocumentProcessingService.class), imports);
+            mock(DocumentProcessingService.class), imports, mock(AssignmentService.class), new DocumentPrivacyService(new PrivacyProperties(null, null)));
 
     private final User teacher = new User();
     private final Course course = Course.builder().id(10L).title("Algorithms").build();

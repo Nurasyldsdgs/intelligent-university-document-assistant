@@ -8,6 +8,8 @@ import org.apache.tika.metadata.TikaCoreProperties;
 import org.apache.tika.parser.AutoDetectParser;
 import org.apache.tika.parser.ParseContext;
 import org.apache.tika.parser.Parser;
+import org.apache.tika.parser.ocr.TesseractOCRConfig;
+import org.apache.tika.parser.pdf.PDFParserConfig;
 import org.apache.tika.sax.BodyContentHandler;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
@@ -58,6 +60,14 @@ public class DocumentParserService {
         }
         ParseContext context = new ParseContext();
         context.set(Parser.class, parser); // Also extract the text of embedded files (e.g. attachments in a DOCX).
+        // Never OCR here, in the upload request: Tika would start Tesseract by itself if it is on PATH. Scans are
+        // recognized later by the background job (DocumentOcrService, US-07).
+        TesseractOCRConfig noOcr = new TesseractOCRConfig();
+        noOcr.setSkipOcr(true);
+        context.set(TesseractOCRConfig.class, noOcr);
+        PDFParserConfig pdf = new PDFParserConfig();
+        pdf.setOcrStrategy(PDFParserConfig.OCR_STRATEGY.NO_OCR);
+        context.set(PDFParserConfig.class, pdf);
         BodyContentHandler handler = new BodyContentHandler(MAX_TEXT_LENGTH);
 
         boolean truncated = false;

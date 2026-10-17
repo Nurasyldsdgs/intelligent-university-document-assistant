@@ -13,6 +13,8 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -64,6 +66,23 @@ public class Assignment {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "source_document_id")
     private Document sourceDocument;
+
+    /**
+     * Set once the course teacher takes an AI assignment over (edits, closes or reopens it): the title+deadline key it
+     * had before, so a later re-analysis still recognises it but never changes or removes it. Null otherwise.
+     */
+    @Column(name = "ai_match_key", length = 300)
+    private String aiMatchKey;
+
+    /**
+     * An AI draft that looks like this existing assignment of the course (AssignmentTitles.likelySame): shown to the
+     * teacher as "Похоже на", never merged automatically. Cleared by the teacher ("Это другое задание") or when that
+     * assignment is deleted (ON DELETE SET NULL).
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "duplicate_of_id")
+    @OnDelete(action = OnDeleteAction.SET_NULL)
+    private Assignment duplicateOf;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

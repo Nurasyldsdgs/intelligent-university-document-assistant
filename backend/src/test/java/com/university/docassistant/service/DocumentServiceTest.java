@@ -1,5 +1,6 @@
 package com.university.docassistant.service;
 
+import com.university.docassistant.config.PrivacyProperties;
 import com.university.docassistant.entity.AiStatus;
 import com.university.docassistant.entity.Course;
 import com.university.docassistant.entity.Document;
@@ -64,7 +65,8 @@ class DocumentServiceTest {
     private final DocumentProcessingService processing = mock(DocumentProcessingService.class);
     private final DocumentService service = new DocumentService(documents, mock(TaskRepository.class),
             mock(AssignmentRepository.class), access, storage, parser, analysis, ai, mock(DocumentChunkService.class),
-            audit, classifier, processing, mock(com.university.docassistant.repository.BatchImportRepository.class));
+            audit, classifier, processing, mock(com.university.docassistant.repository.BatchImportRepository.class),
+            mock(AssignmentService.class), new DocumentPrivacyService(new PrivacyProperties(null, null)));
 
     private final User teacher = new User();
     private final Course course = Course.builder().id(10L).title("Algorithms").build();
@@ -132,7 +134,8 @@ class DocumentServiceTest {
 
         assertThat(uploaded.aiStatus()).isEqualTo(AiStatus.FAILED);
         assertThat(uploaded.category()).isEqualTo(DocumentCategory.OTHER);
-        verifyNoInteractions(processing, classifier);
+        verifyNoInteractions(classifier);
+        verifyNoBackgroundJob();
     }
 
     @Test
@@ -141,7 +144,8 @@ class DocumentServiceTest {
 
         assertThat(uploaded.aiStatus()).isEqualTo(AiStatus.MANUAL);
         verify(analysis).analyzeAndCreateTasksAsync(100L);
-        verifyNoInteractions(processing, classifier);
+        verifyNoInteractions(classifier);
+        verifyNoBackgroundJob();
     }
 
     @Test
@@ -160,7 +164,8 @@ class DocumentServiceTest {
         assertThat(savedDocument().getVisibility()).isEqualTo(DocumentVisibility.COURSE_STUDENTS);
         assertThat(auditDetails()).doesNotContain("forced");
         // A manual category is not an AI result: nothing is classified, stored or reported.
-        verifyNoInteractions(classifier, processing);
+        verifyNoInteractions(classifier);
+        verifyNoBackgroundJob();
         assertThat(uploaded.aiCategory()).isNull();
         assertThat(uploaded.aiStatus()).isEqualTo(AiStatus.MANUAL);
     }
@@ -239,6 +244,12 @@ class DocumentServiceTest {
     }
 
     /** A real one-page PDF: uploads are validated by content (FileTypeValidator). */
+    /** Upload only asks the processing service whether OCR is needed (US-07); no classification or OCR job is queued. */
+    private void verifyNoBackgroundJob() {
+        verify(processing, never()).processAsync(any());
+        verify(processing, never()).ocrAsync(any());
+    }
+
     private static MockMultipartFile file(String name) {
         try (PDDocument pdf = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             pdf.addPage(new PDPage());

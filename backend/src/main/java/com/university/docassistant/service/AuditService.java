@@ -33,6 +33,15 @@ public class AuditService {
     public static final String COURSE_INVITE_REGENERATED = "COURSE_INVITE_REGENERATED";
     public static final String ASSIGNMENT_CREATED = "ASSIGNMENT_CREATED";
     public static final String ASSIGNMENT_DELETED = "ASSIGNMENT_DELETED";
+    public static final String ASSIGNMENT_CLOSED = "ASSIGNMENT_CLOSED";
+    public static final String ASSIGNMENT_PUBLISHED = "ASSIGNMENT_PUBLISHED";
+    public static final String ASSIGNMENT_REOPENED = "ASSIGNMENT_REOPENED";
+    public static final String ASSIGNMENT_DEADLINE_CHANGED = "ASSIGNMENT_DEADLINE_CHANGED";
+    public static final String PII_ORIGINAL_VIEWED = "PII_ORIGINAL_VIEWED";
+    public static final String PII_ORIGINAL_ALLOWED = "PII_ORIGINAL_ALLOWED";
+    public static final String PII_ORIGINAL_DENIED = "PII_ORIGINAL_DENIED";
+    public static final String DOCUMENT_CATEGORY_SET = "DOCUMENT_CATEGORY_SET";
+    public static final String OCR_RETRY_REQUESTED = "OCR_RETRY_REQUESTED";
     public static final String TASK_SUBMITTED = "TASK_SUBMITTED";
     public static final String ROLE_CHANGED = "ROLE_CHANGED";
     public static final String TEACHER_REQUEST_APPROVED = "TEACHER_REQUEST_APPROVED";

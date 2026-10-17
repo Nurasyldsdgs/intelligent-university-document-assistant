@@ -13,7 +13,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
  */
 @Configuration
 @EnableAsync
-@EnableConfigurationProperties(AiProperties.class)
+@EnableConfigurationProperties({AiProperties.class, PrivacyProperties.class, OcrProperties.class})
 public class AsyncConfig {
 
     public static final String AI_EXECUTOR = "aiTaskExecutor";

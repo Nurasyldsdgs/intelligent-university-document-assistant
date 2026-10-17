@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { CalendarClock, FileText, Loader2, Trash2 } from 'lucide-react'
+import { CalendarClock, FileText, Loader2, Lock, Trash2 } from 'lucide-react'
 import { TASK_STATUS_LABELS } from '../constants/documents'
 import { getDeadlineInfo, getTaskType } from '../utils/tasks'
 
@@ -14,13 +14,15 @@ const tagClass = 'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[
 /**
  * One task - or course assignment - with type and deadline tags. With {@code onStatusChange} the status is a select
  * (own tasks), otherwise a read-only badge when the status is a task status; {@code showDocument} links the source
- * document; {@code onDelete} adds a delete button (assignments, for the course teacher); {@code extra} is rendered
- * under the tags (submissions).
+ * document; {@code onDelete} adds a delete button (assignments, for the course teacher); {@code actions} adds more
+ * buttons next to it; {@code extra} is rendered under the tags (submissions). A closed assignment - or a student's
+ * task of one - is marked "Закрыто".
  */
-export default function TaskItem({ task, onStatusChange, onDelete, updating = false, showDocument = false, extra = null }) {
+export default function TaskItem({ task, onStatusChange, onDelete, actions = null, updating = false, showDocument = false, extra = null }) {
   const type = getTaskType(task)
   const deadline = getDeadlineInfo(task.deadline, task.status)
   const completed = task.status === 'COMPLETED'
+  const closed = task.status === 'CLOSED' || task.assignmentStatus === 'CLOSED'
   const documentId = task.documentId ?? task.sourceDocumentId
   const documentName = task.documentName ?? task.sourceDocumentName
   const location = useLocation()
@@ -36,6 +38,12 @@ export default function TaskItem({ task, onStatusChange, onDelete, updating = fa
         )}
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <span className={`${tagClass} ${type.badge}`}>{type.label}</span>
+          {closed && (
+            <span className={`${tagClass} bg-slate-100 text-slate-700 ring-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-600`}
+              title="Задание закрыто: новые решения не принимаются">
+              <Lock className="h-3 w-3" /> Закрыто
+            </span>
+          )}
           <span className={`${tagClass} ${deadline.tone}`}>
             <CalendarClock className="h-3 w-3" />
             {deadline.label}
@@ -77,6 +85,7 @@ export default function TaskItem({ task, onStatusChange, onDelete, updating = fa
       ) : TASK_STATUS_LABELS[task.status] && (
         <span className={`${tagClass} shrink-0 self-start ${STATUS_STYLES[task.status]}`}>{TASK_STATUS_LABELS[task.status]}</span>
       )}
+      {actions}
       {onDelete && (
         <button
           type="button"

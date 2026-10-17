@@ -21,6 +21,7 @@ import com.university.docassistant.service.DocumentService;
 import com.university.docassistant.service.DocumentService.DocumentContent;
 import com.university.docassistant.util.SortValidator;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Pageable;
@@ -208,7 +209,7 @@ public class DocumentController {
 
     @GetMapping("/{id}/view")
     public ResponseEntity<Resource> view(@PathVariable Long id, @AuthenticationPrincipal UserDetails principal) {
-        DocumentContent result = documentService.download(id, principal.getUsername());
+        DocumentContent result = documentService.view(id, principal.getUsername());
         Document document = result.document();
 
         MediaType contentType = MediaType.parseMediaType(document.getContentType());
@@ -226,6 +227,34 @@ public class DocumentController {
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
                 .header("X-Content-Type-Options", "nosniff")
                 .body(result.content());
+    }
+
+    /** "Указать тип вручную": the teacher sets the category the AI could not find; MANAGE_COURSE, audited. */
+    @PostMapping("/{id}/category")
+    public DocumentResponse setCategory(@PathVariable Long id, @Valid @RequestBody SetCategoryRequest request,
+                                        @AuthenticationPrincipal UserDetails principal) {
+        return documentService.setCategory(id, request.category(), principal.getUsername());
+    }
+
+    /** "Повторить распознавание": re-queues the processing job of a scan whose OCR failed; MANAGE_COURSE, audited. */
+    @PostMapping("/{id}/ocr/retry")
+    public DocumentResponse retryOcr(@PathVariable Long id, @AuthenticationPrincipal UserDetails principal) {
+        return documentService.retryOcr(id, principal.getUsername());
+    }
+
+    public record SetCategoryRequest(@NotNull DocumentCategory category) {
+    }
+
+    /** US-09: students may open the original although it contains personal data; MANAGE_COURSE, audited. */
+    @PostMapping("/{id}/allow-original")
+    public DocumentResponse allowOriginal(@PathVariable Long id, @AuthenticationPrincipal UserDetails principal) {
+        return documentService.setOriginalAllowedForStudents(id, true, principal.getUsername());
+    }
+
+    /** US-09: students get only the masked text again (the default); MANAGE_COURSE, audited. */
+    @PostMapping("/{id}/deny-original")
+    public DocumentResponse denyOriginal(@PathVariable Long id, @AuthenticationPrincipal UserDetails principal) {
+        return documentService.setOriginalAllowedForStudents(id, false, principal.getUsername());
     }
 
     @DeleteMapping("/{id}")

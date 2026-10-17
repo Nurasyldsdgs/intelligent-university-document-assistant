@@ -13,6 +13,8 @@ import java.util.List;
 /**
  * Chunks documents that have extracted text but no chunks yet: those uploaded before Q&A existed, or whose
  * chunking failed at upload. Idempotent; processes small batches so texts are never all in memory at once.
+ * Chunks are cut from documents.masked_text (US-09), so personal data never reaches Q&A; a document not masked yet
+ * is skipped here and chunked by DocumentPrivacyBackfill.
  */
 @Slf4j
 @Component
@@ -31,7 +33,7 @@ public class DocumentChunkBackfill implements ApplicationRunner {
         while (true) {
             List<Long> ids = jdbcTemplate.queryForList("""
                     SELECT d.id FROM documents d
-                    WHERE d.id > ? AND d.extracted_text IS NOT NULL
+                    WHERE d.id > ? AND d.masked_text IS NOT NULL
                       AND NOT EXISTS (SELECT 1 FROM document_chunks ch WHERE ch.document_id = d.id)
                     ORDER BY d.id LIMIT ?
                     """, Long.class, lastId, BATCH_SIZE);
@@ -40,7 +42,7 @@ public class DocumentChunkBackfill implements ApplicationRunner {
             }
             for (Long id : ids) {
                 String text = jdbcTemplate.queryForObject(
-                        "SELECT extracted_text FROM documents WHERE id = ?", String.class, id);
+                        "SELECT masked_text FROM documents WHERE id = ?", String.class, id);
                 chunkService.index(id, text);
                 documents++;
             }

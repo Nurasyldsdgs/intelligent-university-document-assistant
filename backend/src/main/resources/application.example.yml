@@ -112,6 +112,25 @@ app:
       endpoint: ${S3_ENDPOINT:}
       # MinIO needs path-style URLs (http://host/bucket/key); AWS works with the default false.
       path-style-access: ${S3_PATH_STYLE_ACCESS:false}
+  ocr:
+    # US-07: text recognition for scanned PDFs and images with Tesseract (needs rus, kaz, eng language packs).
+    # Runs only in the background job after an upload, never in the upload request. A PDF or image with less than
+    # 100 characters of text is recognized; if that fails, the document is kept and marked "Нужна проверка".
+    enabled: ${OCR_ENABLED:false}
+    # Folder of the tesseract executable (or the executable itself), e.g. C:/Program Files/Tesseract-OCR; empty = PATH
+    tesseract-path: ${OCR_TESSERACT_PATH:}
+    languages: ${OCR_LANGUAGES:rus+kaz+eng}
+    # Longest recognition of one document (also the limit of each Tesseract run)
+    timeout: ${OCR_TIMEOUT:120s}
+    # Only the first pages of a longer PDF are recognized
+    max-pages: ${OCR_MAX_PAGES:20}
+  privacy:
+    # US-09: personal data (IIN, Kazakh phone numbers, e-mails, ID card / passport numbers) is masked in a copy of every
+    # document's text; the AI, Q&A, snippets and search only ever see that copy. The original stays for the teacher.
+    # false = no masking (the copy equals the text). Changing either setting re-masks old documents at startup.
+    enabled: ${PRIVACY_ENABLED:true}
+    # E-mails on these domains (and subdomains) are not personal and stay readable, e.g. sdu.edu.kz,university.kz
+    public-email-domains: ${PRIVACY_PUBLIC_EMAIL_DOMAINS:}
   ai:
     # Classification (US-05), deadline extraction and Q&A through an OpenAI-compatible Chat Completions API.
     # Default: Groq with openai/gpt-oss-120b; OpenAI, DeepSeek, OpenRouter... work by changing the two lines below.
@@ -135,3 +154,6 @@ app:
     # Tries per AI call, the first one included, when the API answers 429 (rate limit) or 5xx. Waits for Retry-After
     # (at most 20 s) or else 2 s, 4 s, ... Other errors and timeouts are never retried. Missing or < 1 means 3.
     max-attempts: ${AI_MAX_ATTEMPTS:3}
+    # Assignments and deadlines the AI finds in a document start as drafts: the course teacher reviews and publishes
+    # them (course page, "Черновики от ИИ") before students see them or get tasks. true = publish at once, as before.
+    auto-publish-assignments: ${AI_AUTO_PUBLISH_ASSIGNMENTS:false}

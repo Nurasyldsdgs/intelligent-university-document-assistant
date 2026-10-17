@@ -1,5 +1,6 @@
 package com.university.docassistant.entity;
 
+import jakarta.persistence.Basic;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -105,6 +106,45 @@ public class Document {
      * First 200 characters of {@code extractedText} on one line, null exactly when there is no text.
      * Lists read this column instead of the full text, so a page of results stays small.
      */
+    /**
+     * US-09: the text with personal data replaced by placeholders ([ИИН скрыт], [телефон скрыт], ...). Everything that
+     * leaves the database for the external AI, the Q&A chunks, the snippet and full-text search use this copy; the
+     * original above stays for the course teacher and ADMIN. Null when there is no text.
+     */
+    @Column(name = "masked_text", columnDefinition = "TEXT")
+    @Basic(fetch = FetchType.LAZY)
+    private String maskedText;
+
+    /** How many personal data items were masked, and of which kinds ("IIN,PHONE"; null when none). */
+    @Column(name = "pii_count", nullable = false)
+    @ColumnDefault("0")
+    private int piiCount;
+
+    @Column(name = "pii_types", length = 100)
+    private String piiTypes;
+
+    /** DocumentPrivacyService.fingerprint() the masked copy was made with; another value means "mask again". */
+    @Column(name = "pii_scan", length = 64)
+    private String piiScan;
+
+    /**
+     * The course teacher let students open the original file although it contains personal data (pii_count > 0).
+     * Off by default: students then get only the masked text.
+     */
+    @Column(name = "original_allowed_for_students", nullable = false)
+    @ColumnDefault("false")
+    private boolean originalAllowedForStudents;
+
+    /** US-07: text recognition of a scan; null when none is needed. FAILED = "Нужна проверка" for the teacher. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ocr_status", length = 20)
+    private OcrStatus ocrStatus;
+
+    /** The stored text was recognized by OCR, not read from a text layer. */
+    @Column(name = "text_from_ocr", nullable = false)
+    @ColumnDefault("false")
+    private boolean textFromOcr;
+
     @Column(name = "text_snippet", length = 255)
     private String textSnippet;
 

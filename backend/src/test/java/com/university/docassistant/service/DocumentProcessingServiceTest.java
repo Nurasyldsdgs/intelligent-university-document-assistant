@@ -38,7 +38,7 @@ class DocumentProcessingServiceTest {
     private final AuditService audit = mock(AuditService.class);
     // A mock manager: TransactionTemplate then simply runs the callback.
     private final DocumentProcessingService service = new DocumentProcessingService(documents, classifications,
-            classifier, analysis, audit, mock(PlatformTransactionManager.class));
+            classifier, analysis, audit, mock(PlatformTransactionManager.class), mock(DocumentOcrService.class));
 
     @BeforeEach
     void setUp() {

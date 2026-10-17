@@ -5,6 +5,7 @@ import com.university.docassistant.entity.Document;
 import com.university.docassistant.entity.DocumentCategory;
 import com.university.docassistant.entity.DocumentType;
 import com.university.docassistant.entity.DocumentVisibility;
+import com.university.docassistant.entity.OcrStatus;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -64,7 +65,7 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
     List<DocumentSummary> findSummariesByIdIn(@Param("ids") Collection<Long> ids);
 
     /**
-     * Ids of documents whose extracted text matches {@code query} (web-search syntax: words are ANDed,
+     * Ids of documents whose masked text (US-09: text_tsv is built from masked_text) matches {@code query} (web-search syntax: words are ANDed,
      * "quoted phrase", OR, -excluded), best match first. {@code all} (ADMIN) lifts the course filter, which is
      * the same as in {@link #findSummariesInCourses}. Uses the GIN index from DocumentSearchSchema.
      * The page must be unsorted: the order is fixed by relevance.
@@ -98,13 +99,74 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
     @EntityGraph(attributePaths = {"owner", "course"})
     Optional<Document> findWithOwnerById(Long id);
 
-    /** What AI analysis needs from a document, without loading the entity and its associations. */
-    record AnalysisSource(Long id, DocumentCategory category, String extractedText, Long ownerId, Long courseId) {
+    /** What OCR needs: the stored file and the course teacher's e-mail (kept readable by the masking). */
+    record OcrSource(Long id, String storedFileName, String originalFileName, String contentType, String teacherEmail) {
+    }
+
+    @Query("""
+            SELECT new com.university.docassistant.repository.DocumentRepository$OcrSource(
+                d.id, d.storedFileName, d.originalFileName, d.contentType, t.email)
+            FROM Document d LEFT JOIN d.course c LEFT JOIN c.teacher t WHERE d.id = :id
+            """)
+    Optional<OcrSource> findOcrSource(@Param("id") Long id);
+
+    /** Moves ocr_status only from {@code from}: 1 when this caller got the document, 0 when not in that state. */
+    @Modifying
+    @Query("UPDATE Document d SET d.ocrStatus = :to WHERE d.id = :id AND d.ocrStatus = :from")
+    int changeOcrStatus(@Param("id") Long id, @Param("from") OcrStatus from, @Param("to") OcrStatus to);
+
+    /** Stores OCR-recognized text exactly like uploaded text (original, masked copy, snippet, counts) and marks it. */
+    @Modifying
+    @Query("""
+            UPDATE Document d SET d.extractedText = :text, d.textTruncated = :truncated, d.maskedText = :maskedText,
+                d.textSnippet = :snippet, d.piiCount = :piiCount, d.piiTypes = :piiTypes, d.piiScan = :fingerprint,
+                d.textFromOcr = true, d.ocrStatus = com.university.docassistant.entity.OcrStatus.DONE
+            WHERE d.id = :id
+            """)
+    int updateRecognizedText(@Param("id") Long id, @Param("text") String text, @Param("truncated") boolean truncated,
+                             @Param("maskedText") String maskedText, @Param("snippet") String snippet,
+                             @Param("piiCount") int piiCount, @Param("piiTypes") String piiTypes,
+                             @Param("fingerprint") String fingerprint);
+
+    /** A document whose text must be masked (again), with its course teacher's e-mail (kept readable). */
+    record PrivacySource(Long id, String extractedText, String teacherEmail, String piiScan) {
+    }
+
+    /**
+     * Next documents with text whose masked copy is missing or was made with other settings than {@code fingerprint},
+     * in id order after {@code afterId}: DocumentPrivacyBackfill walks them in batches.
+     */
+    @Query("""
+            SELECT new com.university.docassistant.repository.DocumentRepository$PrivacySource(
+                d.id, d.extractedText, t.email, d.piiScan)
+            FROM Document d LEFT JOIN d.course c LEFT JOIN c.teacher t
+            WHERE d.id > :afterId AND d.extractedText IS NOT NULL
+              AND (d.piiScan IS NULL OR d.piiScan <> :fingerprint)
+            ORDER BY d.id
+            """)
+    List<PrivacySource> findPrivacyBatch(@Param("fingerprint") String fingerprint, @Param("afterId") Long afterId,
+                                         Pageable pageable);
+
+    @Modifying
+    @Query("""
+            UPDATE Document d SET d.maskedText = :maskedText, d.textSnippet = :snippet, d.piiCount = :piiCount,
+                d.piiTypes = :piiTypes, d.piiScan = :fingerprint
+            WHERE d.id = :id
+            """)
+    int updatePrivacy(@Param("id") Long id, @Param("maskedText") String maskedText, @Param("snippet") String snippet,
+                      @Param("piiCount") int piiCount, @Param("piiTypes") String piiTypes,
+                      @Param("fingerprint") String fingerprint);
+
+    /**
+     * What AI analysis needs from a document, without loading the entity and its associations. {@code maskedText} is
+     * the copy without personal data (US-09): the original never goes to the AI.
+     */
+    record AnalysisSource(Long id, DocumentCategory category, String maskedText, Long ownerId, Long courseId) {
     }
 
     @Query("""
             SELECT new com.university.docassistant.repository.DocumentRepository$AnalysisSource(
-                d.id, d.category, d.extractedText, d.owner.id, c.id)
+                d.id, d.category, d.maskedText, d.owner.id, c.id)
             FROM Document d LEFT JOIN d.course c WHERE d.id = :id
             """)
     Optional<AnalysisSource> findAnalysisSource(@Param("id") Long id);
@@ -121,24 +183,27 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
 
     /** What a status poll needs from a document, with what deciding access to it needs. */
     record StatusRow(Long id, Long courseId, DocumentVisibility visibility, AiStatus aiStatus,
-                     DocumentCategory category, Double confidence) {
+                     DocumentCategory category, Double confidence, OcrStatus ocrStatus, boolean textFromOcr) {
     }
 
     @Query("""
             SELECT new com.university.docassistant.repository.DocumentRepository$StatusRow(
-                d.id, d.course.id, d.visibility, d.aiStatus, d.category, dc.confidenceScore)
+                d.id, d.course.id, d.visibility, d.aiStatus, d.category, dc.confidenceScore, d.ocrStatus, d.textFromOcr)
             FROM Document d LEFT JOIN DocumentClassification dc ON dc.document = d
             WHERE d.id IN :ids
             """)
     List<StatusRow> findStatusRows(@Param("ids") Collection<Long> ids);
 
-    /** What background classification needs from a document, without loading the entity and its associations. */
-    record ClassificationSource(Long id, String originalFileName, String extractedText, String ownerEmail) {
+    /**
+     * What background classification needs from a document, without loading the entity and its associations.
+     * {@code maskedText} is the copy without personal data (US-09).
+     */
+    record ClassificationSource(Long id, String originalFileName, String maskedText, String ownerEmail) {
     }
 
     @Query("""
             SELECT new com.university.docassistant.repository.DocumentRepository$ClassificationSource(
-                d.id, d.originalFileName, d.extractedText, o.email)
+                d.id, d.originalFileName, d.maskedText, o.email)
             FROM Document d JOIN d.owner o WHERE d.id = :id
             """)
     Optional<ClassificationSource> findClassificationSource(@Param("id") Long id);
@@ -181,6 +246,9 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
 
     @Query("SELECT d.storedFileName FROM Document d WHERE d.owner.id = :ownerId")
     List<String> findStoredFileNamesByOwnerId(@Param("ownerId") Long ownerId);
+
+    @Query("SELECT d.id FROM Document d WHERE d.owner.id = :ownerId")
+    List<Long> findIdsByOwnerId(@Param("ownerId") Long ownerId);
 
     @Modifying
     @Query("DELETE FROM Document d WHERE d.owner.id = :ownerId")
